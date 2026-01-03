@@ -2,6 +2,42 @@ import { z } from "zod";
 import { createTRPCRouter, protectedProcedure, publicProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 
+// Request timeout configuration (in milliseconds)
+const TIMEOUTS = {
+  DEFAULT: 30000,        // 30 seconds for standard requests
+  AI_OPERATION: 120000,  // 2 minutes for AI operations
+  VIDEO_GENERATION: 300000, // 5 minutes for video generation
+} as const;
+
+// Helper for fetch with timeout
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit & { timeout?: number } = {}
+): Promise<Response> {
+  const { timeout = TIMEOUTS.DEFAULT, ...fetchOptions } = options;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, {
+      ...fetchOptions,
+      signal: controller.signal,
+    });
+    return response;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new TRPCError({
+        code: "TIMEOUT",
+        message: `Request timed out after ${timeout / 1000} seconds`,
+      });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 const voiceSettingsSchema = z.object({
   voice_id: z.string().optional(),
   language: z.string().default("en-US"),
@@ -45,7 +81,7 @@ export const tourVideoRouter = createTRPCRouter({
         });
       }
 
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `${API_URL}/api/v1/tour-videos/from-listing/${input.listingId}`,
         {
           method: "POST",
@@ -60,6 +96,7 @@ export const tourVideoRouter = createTRPCRouter({
             brand_kit_id: input.brandKitId,
             photo_order: input.photoOrder,
           }),
+          timeout: TIMEOUTS.VIDEO_GENERATION,
         }
       );
 
@@ -88,12 +125,13 @@ export const tourVideoRouter = createTRPCRouter({
       const { data: { session } } = await ctx.supabase.auth.getSession();
       const token = session?.access_token;
 
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `${API_URL}/api/v1/tour-videos/${input.projectId}/progress`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
           },
+          timeout: TIMEOUTS.DEFAULT,
         }
       );
 
@@ -126,12 +164,13 @@ export const tourVideoRouter = createTRPCRouter({
       const { data: { session } } = await ctx.supabase.auth.getSession();
       const token = session?.access_token;
 
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `${API_URL}/api/v1/tour-videos/${input.projectId}/preview`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
           },
+          timeout: TIMEOUTS.DEFAULT,
         }
       );
 
@@ -191,10 +230,11 @@ export const tourVideoRouter = createTRPCRouter({
         return defaultVoices;
       }
 
-      const response = await fetch(`${API_URL}/api/v1/tour-videos/voices`, {
+      const response = await fetchWithTimeout(`${API_URL}/api/v1/tour-videos/voices`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
+        timeout: TIMEOUTS.DEFAULT,
       });
 
       if (!response.ok) {
@@ -229,13 +269,14 @@ export const tourVideoRouter = createTRPCRouter({
       const { data: { session } } = await ctx.supabase.auth.getSession();
       const token = session?.access_token;
 
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `${API_URL}/api/v1/tour-videos/${input.projectId}`,
         {
           method: "DELETE",
           headers: {
             Authorization: `Bearer ${token}`,
           },
+          timeout: TIMEOUTS.DEFAULT,
         }
       );
 
@@ -257,12 +298,13 @@ export const tourVideoRouter = createTRPCRouter({
       const { data: { session } } = await ctx.supabase.auth.getSession();
       const token = session?.access_token;
 
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `${API_URL}/api/v1/projects?type=listing_tour&property_id=${input.listingId}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
           },
+          timeout: TIMEOUTS.DEFAULT,
         }
       );
 
