@@ -4,17 +4,19 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.dependencies import get_user_organization_id
 from app.api.v1.auth import get_current_user
 from app.database import get_db
+from app.exceptions import NotFoundError
 from app.models.project import Project, ProjectStatus, ProjectType, Scene
 from app.models.render import RenderJob
-from app.models.user import OrganizationMember, User
+from app.models.user import User
 
 router = APIRouter()
 
@@ -132,21 +134,6 @@ class ProjectListResponse(BaseModel):
     limit: int
 
 
-# Helper to get user's organization
-async def get_user_organization_id(user: User, db: AsyncSession) -> UUID:
-    """Get the user's primary organization ID."""
-    result = await db.execute(
-        select(OrganizationMember)
-        .where(OrganizationMember.user_id == user.id)
-        .order_by(OrganizationMember.joined_at)
-        .limit(1)
-    )
-    member = result.scalar_one_or_none()
-    if not member:
-        raise HTTPException(status_code=400, detail="User has no organization")
-    return member.organization_id
-
-
 # Endpoints
 @router.get("", response_model=ProjectListResponse)
 async def list_projects(
@@ -235,8 +222,11 @@ async def get_project(
     project = result.scalar_one_or_none()
     
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
+        raise NotFoundError(
+            message="Project not found",
+            details={"project_id": str(project_id)}
+        )
+
     return ProjectResponse.model_validate(project)
 
 
@@ -256,8 +246,11 @@ async def update_project(
     project = result.scalar_one_or_none()
     
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
+        raise NotFoundError(
+            message="Project not found",
+            details={"project_id": str(project_id)}
+        )
+
     # Update fields
     update_data = project_data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -287,7 +280,10 @@ async def delete_project(
     project = result.scalar_one_or_none()
 
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise NotFoundError(
+            message="Project not found",
+            details={"project_id": str(project_id)}
+        )
 
     # Delete related render jobs first (foreign key constraint)
     render_jobs_result = await db.execute(
@@ -316,8 +312,11 @@ async def list_scenes(
         select(Project).where(Project.id == project_id, Project.organization_id == org_id)
     )
     if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
-    
+        raise NotFoundError(
+            message="Project not found",
+            details={"project_id": str(project_id)}
+        )
+
     result = await db.execute(
         select(Scene)
         .where(Scene.project_id == project_id)
@@ -343,8 +342,11 @@ async def create_scene(
         select(Project).where(Project.id == project_id, Project.organization_id == org_id)
     )
     if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
-    
+        raise NotFoundError(
+            message="Project not found",
+            details={"project_id": str(project_id)}
+        )
+
     scene = Scene(
         project_id=project_id,
         **scene_data.model_dump(),
@@ -373,15 +375,21 @@ async def update_scene(
         select(Project).where(Project.id == project_id, Project.organization_id == org_id)
     )
     if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
-    
+        raise NotFoundError(
+            message="Project not found",
+            details={"project_id": str(project_id)}
+        )
+
     result = await db.execute(
         select(Scene).where(Scene.id == scene_id, Scene.project_id == project_id)
     )
     scene = result.scalar_one_or_none()
-    
+
     if not scene:
-        raise HTTPException(status_code=404, detail="Scene not found")
+        raise NotFoundError(
+            message="Scene not found",
+            details={"scene_id": str(scene_id), "project_id": str(project_id)}
+        )
     
     # Update fields
     update_data = scene_data.model_dump(exclude_unset=True)

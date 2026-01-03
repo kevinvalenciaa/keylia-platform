@@ -1,10 +1,10 @@
 """Authentication endpoints."""
 
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -24,8 +24,43 @@ router = APIRouter()
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# OAuth2 scheme
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+# OAuth2 scheme (supports both header and cookie-based auth)
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
+
+# Cookie settings for secure token storage
+COOKIE_NAME = "access_token"
+REFRESH_COOKIE_NAME = "refresh_token"
+COOKIE_SECURE = True  # Only send over HTTPS
+COOKIE_HTTPONLY = True  # Prevent JavaScript access (XSS protection)
+COOKIE_SAMESITE = "lax"  # CSRF protection
+
+
+def set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
+    """Set HTTP-only cookies for authentication tokens."""
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=access_token,
+        httponly=COOKIE_HTTPONLY,
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        max_age=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=refresh_token,
+        httponly=COOKIE_HTTPONLY,
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        max_age=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/api/v1/auth",  # Only send to auth endpoints
+    )
+
+
+def clear_auth_cookies(response: Response) -> None:
+    """Clear authentication cookies on logout."""
+    response.delete_cookie(key=COOKIE_NAME, path="/")
+    response.delete_cookie(key=REFRESH_COOKIE_NAME, path="/api/v1/auth")
 
 
 # Schemas
@@ -181,18 +216,33 @@ async def get_or_create_user_from_supabase(
 
 
 async def get_current_user(
-    token: Annotated[str, Depends(oauth2_scheme)],
+    token: Annotated[Optional[str], Depends(oauth2_scheme)] = None,
+    access_token_cookie: Optional[str] = Cookie(None, alias=COOKIE_NAME),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Get the current authenticated user."""
+    """
+    Get the current authenticated user.
+
+    Supports both:
+    - Bearer token in Authorization header (for API clients)
+    - HTTP-only cookie (for browser-based apps, more secure against XSS)
+
+    Priority: Header token > Cookie token
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
 
+    # Get token from header or cookie
+    auth_token = token or access_token_cookie
+
+    if not auth_token:
+        raise credentials_exception
+
     # First, try to verify as a Supabase token
-    supabase_user = await verify_supabase_token(token)
+    supabase_user = await verify_supabase_token(auth_token)
     if supabase_user:
         user = await get_or_create_user_from_supabase(supabase_user, db)
         if user and user.is_active:
@@ -203,7 +253,7 @@ async def get_current_user(
     # Fall back to local JWT verification
     try:
         payload = jwt.decode(
-            token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
+            auth_token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
         )
         user_id: str = payload.get("sub")
         if user_id is None:
@@ -226,6 +276,7 @@ async def get_current_user(
 @router.post("/register", response_model=TokenResponse)
 async def register(
     user_data: UserCreate,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
     """Register a new user."""
@@ -265,11 +316,14 @@ async def register(
     
     await db.commit()
     await db.refresh(user)
-    
+
     # Generate tokens
     access_token = create_access_token(data={"sub": str(user.id)})
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
-    
+
+    # Set HTTP-only cookies for secure browser authentication
+    set_auth_cookies(response, access_token, refresh_token)
+
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -287,6 +341,7 @@ async def register(
 @router.post("/login", response_model=TokenResponse)
 async def login(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
     """Login with email and password."""
@@ -310,11 +365,14 @@ async def login(
     # Update last login
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
-    
+
     # Generate tokens
     access_token = create_access_token(data={"sub": str(user.id)})
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
-    
+
+    # Set HTTP-only cookies for secure browser authentication
+    set_auth_cookies(response, access_token, refresh_token)
+
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -330,34 +388,51 @@ async def login(
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(
-    refresh_token: str,
+async def refresh_access_token(
+    response: Response,
+    refresh_token_body: str | None = None,
+    refresh_token_cookie: Optional[str] = Cookie(None, alias=REFRESH_COOKIE_NAME),
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
-    """Refresh access token."""
+    """
+    Refresh access token.
+
+    Accepts refresh token from:
+    - Request body (for API clients)
+    - HTTP-only cookie (for browser-based apps)
+    """
+    # Get refresh token from body or cookie
+    refresh_token = refresh_token_body or refresh_token_cookie
+
+    if not refresh_token:
+        raise HTTPException(status_code=400, detail="Refresh token required")
+
     try:
         payload = jwt.decode(
             refresh_token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
         )
         if payload.get("type") != "refresh":
             raise HTTPException(status_code=400, detail="Invalid token type")
-        
+
         user_id = payload.get("sub")
         if not user_id:
             raise HTTPException(status_code=400, detail="Invalid token")
     except JWTError:
         raise HTTPException(status_code=400, detail="Invalid token")
-    
+
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
-    
+
     if not user:
         raise HTTPException(status_code=400, detail="User not found")
-    
+
     # Generate new tokens
     new_access_token = create_access_token(data={"sub": str(user.id)})
     new_refresh_token = create_refresh_token(data={"sub": str(user.id)})
-    
+
+    # Set HTTP-only cookies for secure browser authentication
+    set_auth_cookies(response, new_access_token, new_refresh_token)
+
     return TokenResponse(
         access_token=new_access_token,
         refresh_token=new_refresh_token,
@@ -370,4 +445,16 @@ async def refresh_token(
             created_at=user.created_at,
         ),
     )
+
+
+@router.post("/logout")
+async def logout(response: Response) -> dict:
+    """
+    Logout the current user by clearing authentication cookies.
+
+    Note: This only clears cookies. If using header-based auth,
+    the client should discard the token.
+    """
+    clear_auth_cookies(response)
+    return {"message": "Successfully logged out"}
 

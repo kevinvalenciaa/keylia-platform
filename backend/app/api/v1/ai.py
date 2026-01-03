@@ -1,18 +1,24 @@
 """AI generation endpoints."""
 
+import json
+import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+import anthropic
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.dependencies import get_user_organization_id
 from app.api.v1.auth import get_current_user
-from app.api.v1.projects import get_user_organization_id
 from app.database import get_db
 from app.models.project import Project, Scene
 from app.models.user import User
 from app.services.ai.script_generator import ScriptGeneratorService
+from app.services.circuit_breaker import CircuitBreakerOpen
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -137,8 +143,34 @@ async def generate_script(
             scenes_created=scenes_created,
         )
     
+    except CircuitBreakerOpen as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI service temporarily unavailable. Please try again in a few minutes.",
+        )
+    except anthropic.RateLimitError:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="AI service rate limited. Please try again shortly.",
+        )
+    except anthropic.APIError as e:
+        logger.error(f"Anthropic API error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI service error. Please try again.",
+        )
+    except json.JSONDecodeError:
+        logger.error("Failed to parse AI response as JSON")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to parse AI response. Please try again.",
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Script generation failed: {str(e)}")
+        logger.exception(f"Unexpected error in script generation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Script generation failed. Please try again.",
+        )
 
 
 @router.post("/regenerate-scene-text")
@@ -194,8 +226,22 @@ async def regenerate_scene_text(
             "emotion": regenerated.get("emotion"),
         }
     
+    except CircuitBreakerOpen:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI service temporarily unavailable. Please try again in a few minutes.",
+        )
+    except anthropic.RateLimitError:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="AI service rate limited. Please try again shortly.",
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Scene regeneration failed: {str(e)}")
+        logger.exception(f"Unexpected error in scene regeneration: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Scene regeneration failed. Please try again.",
+        )
 
 
 @router.post("/generate-caption", response_model=GenerateCaptionResponse)
@@ -235,8 +281,22 @@ async def generate_caption(
             first_comment=caption_data.get("first_comment"),
         )
     
+    except CircuitBreakerOpen:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI service temporarily unavailable. Please try again in a few minutes.",
+        )
+    except anthropic.RateLimitError:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="AI service rate limited. Please try again shortly.",
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Caption generation failed: {str(e)}")
+        logger.exception(f"Unexpected error in caption generation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Caption generation failed. Please try again.",
+        )
 
 
 @router.post("/generate-shot-plan")
@@ -296,6 +356,20 @@ async def generate_shot_plan(
             "shot_plan": shot_plan,
         }
     
+    except CircuitBreakerOpen:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI service temporarily unavailable. Please try again in a few minutes.",
+        )
+    except anthropic.RateLimitError:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="AI service rate limited. Please try again shortly.",
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Shot plan generation failed: {str(e)}")
+        logger.exception(f"Unexpected error in shot plan generation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Shot plan generation failed. Please try again.",
+        )
 

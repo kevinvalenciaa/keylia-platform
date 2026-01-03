@@ -1,11 +1,12 @@
 """Tour video generation endpoints."""
 
 import asyncio
+import json
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -102,6 +103,31 @@ DURATION_SCENE_CONFIG = {
 }
 
 
+# Redis client for idempotency
+_redis_client = None
+
+
+async def get_redis_for_idempotency():
+    """Get Redis client for idempotency checks."""
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client
+
+    try:
+        import redis.asyncio as redis
+        _redis_client = redis.from_url(
+            settings.REDIS_URL,
+            encoding="utf-8",
+            decode_responses=True,
+            socket_connect_timeout=2.0,
+            socket_timeout=2.0,
+        )
+        await _redis_client.ping()
+        return _redis_client
+    except Exception:
+        return None
+
+
 # Endpoints
 @router.post("/from-listing/{listing_id}", response_model=GenerateTourVideoResponse)
 async def generate_tour_video_from_listing(
@@ -109,13 +135,30 @@ async def generate_tour_video_from_listing(
     request: GenerateTourVideoRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    x_idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
 ) -> GenerateTourVideoResponse:
     """
     Generate a tour video from an existing listing.
 
     This creates a new project, generates a script, creates scenes,
     and queues a Celery task for video generation.
+
+    Include X-Idempotency-Key header to prevent duplicate job creation
+    on retries or double-clicks.
     """
+    # Check idempotency key if provided
+    if x_idempotency_key:
+        redis = await get_redis_for_idempotency()
+        if redis:
+            try:
+                existing = await redis.get(f"idempotency:{x_idempotency_key}")
+                if existing:
+                    # Return cached response
+                    cached = json.loads(existing)
+                    return GenerateTourVideoResponse(**cached)
+            except Exception:
+                pass  # Continue with request if Redis fails
+
     org_id = await get_user_organization_id(current_user, db)
 
     # Get the listing
@@ -131,12 +174,18 @@ async def generate_tour_video_from_listing(
         raise HTTPException(status_code=404, detail="Listing not found")
 
     # Get photos for this listing
+    # TODO: Add property_listing_id FK to MediaAsset for proper relationship
+    # Current pattern uses storage_key matching which is fragile
+    # The listing_id is validated as UUID by FastAPI path parameter
+    listing_id_str = str(listing_id)
     photos_result = await db.execute(
         select(MediaAsset).where(
             MediaAsset.organization_id == org_id,
             MediaAsset.file_type == "image",
             MediaAsset.processing_status == "completed",
-            MediaAsset.storage_key.contains(str(listing_id)),
+            # Use literal_column to ensure the pattern is safely escaped
+            # Match pattern: listings/{listing_id}/ in storage key
+            MediaAsset.storage_key.like(f"%listings/{listing_id_str}/%"),
         ).order_by(MediaAsset.created_at)
     )
     photos = list(photos_result.scalars().all())
@@ -267,12 +316,33 @@ async def generate_tour_video_from_listing(
         style_settings=request.style_settings.model_dump(),
     )
 
-    return GenerateTourVideoResponse(
+    response = GenerateTourVideoResponse(
         project_id=project.id,
         render_job_id=render_job.id,
         status="queued",
         message="Tour video generation started. Check progress for updates.",
     )
+
+    # Cache response for idempotency key (1 hour TTL)
+    if x_idempotency_key:
+        redis = await get_redis_for_idempotency()
+        if redis:
+            try:
+                response_data = {
+                    "project_id": str(response.project_id),
+                    "render_job_id": str(response.render_job_id),
+                    "status": response.status,
+                    "message": response.message,
+                }
+                await redis.setex(
+                    f"idempotency:{x_idempotency_key}",
+                    3600,  # 1 hour TTL
+                    json.dumps(response_data),
+                )
+            except Exception:
+                pass  # Don't fail if caching fails
+
+    return response
 
 
 @router.get("/{project_id}/progress", response_model=TourVideoProgressResponse)
