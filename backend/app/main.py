@@ -12,8 +12,9 @@ import structlog
 
 from app.api.v1 import router as api_v1_router
 from app.config import settings
-from app.database import init_db
-from app.middleware.rate_limit import RateLimitMiddleware
+from app.database import init_db, check_db_health
+from app.middleware.rate_limit import RateLimitMiddleware, check_redis_health
+from app.exceptions import register_exception_handlers, ServiceUnavailableError
 
 # Configure structured logging
 structlog.configure(
@@ -77,14 +78,86 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Register standardized exception handlers
+register_exception_handlers(app)
+
 # Include API routes
 app.include_router(api_v1_router, prefix="/api/v1")
 
 
 @app.get("/health")
-async def health_check() -> dict[str, str]:
-    """Health check endpoint."""
-    return {"status": "healthy", "version": settings.VERSION}
+async def health_check() -> dict:
+    """
+    Health check endpoint for monitoring and load balancers.
+
+    Returns comprehensive health status including database and Redis connectivity.
+    """
+    db_health = await check_db_health()
+    redis_health = await check_redis_health()
+
+    # Overall status is healthy only if critical dependencies are healthy
+    # Redis is optional (falls back to in-memory), so only DB is critical
+    status = "healthy" if db_health["status"] == "healthy" else "degraded"
+
+    return {
+        "status": status,
+        "version": settings.VERSION,
+        "checks": {
+            "database": db_health,
+            "redis": redis_health,
+        },
+    }
+
+
+@app.get("/health/live")
+async def liveness_check() -> dict[str, str]:
+    """
+    Kubernetes liveness probe - checks if application is running.
+
+    Returns 200 if the application is alive, regardless of dependency health.
+    """
+    return {"status": "alive"}
+
+
+@app.get("/health/ready")
+async def readiness_check() -> dict:
+    """
+    Kubernetes readiness probe - checks if application can serve traffic.
+
+    Returns 200 only if all critical dependencies are healthy.
+    """
+    db_health = await check_db_health()
+
+    if db_health["status"] != "healthy":
+        raise ServiceUnavailableError(
+            message="Database not ready",
+            details={"database_status": db_health}
+        )
+
+    return {"status": "ready", "database": db_health}
+
+
+@app.get("/health/circuits")
+async def circuit_breaker_status() -> dict:
+    """
+    Circuit breaker status for all external services.
+
+    Useful for monitoring API health and debugging failures.
+    """
+    from app.services.circuit_breaker import get_all_circuit_breaker_statuses
+
+    statuses = get_all_circuit_breaker_statuses()
+
+    # Count circuits by state
+    open_circuits = sum(1 for s in statuses if s["state"] == "open")
+    half_open_circuits = sum(1 for s in statuses if s["state"] == "half_open")
+
+    return {
+        "total": len(statuses),
+        "open": open_circuits,
+        "half_open": half_open_circuits,
+        "circuits": statuses,
+    }
 
 
 @app.get("/")

@@ -7,7 +7,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+    """Application settings loaded from environment variables.
+
+    SECURITY: Default values are set for production safety.
+    - DEBUG defaults to False to prevent stack trace exposure
+    - Required secrets have no defaults to force explicit configuration
+    """
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -17,6 +22,8 @@ class Settings(BaseSettings):
 
     # App
     VERSION: str = "0.1.0"
+    # SECURITY: DEBUG must default to False for production safety
+    # Stack traces and internal paths are exposed when DEBUG=True
     DEBUG: bool = False
     SECRET_KEY: str  # Required - must be set in environment
     
@@ -80,6 +87,9 @@ class Settings(BaseSettings):
     FAL_IMAGE_TO_VIDEO_MODEL: str = "fal-ai/kling-video/v1/pro/image-to-video"
     FAL_KLING_MODEL: str = "fal-ai/kling-video/v1/pro/image-to-video"
     
+    # Frontend URL (for redirects)
+    FRONTEND_URL: str = "http://localhost:3000"
+
     # Stripe
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
