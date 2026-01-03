@@ -13,6 +13,42 @@ const propertyTypeEnum = z.enum([
 
 const listingStatusEnum = z.enum(["for_sale", "pending", "sold", "withdrawn", "active"]);
 
+/**
+ * Output schema for listing data - ensures consistent types across API.
+ * This schema is used to properly type the router outputs.
+ */
+const listingOutputSchema = z.object({
+  id: z.string(),
+  user_id: z.string(),
+  address: z.string(),
+  city: z.string(),
+  state: z.string(),
+  zip: z.string(),
+  price: z.number(),
+  bedrooms: z.number(),
+  bathrooms: z.number(),
+  sqft: z.number(),
+  property_type: z.string(),
+  status: z.string(),
+  description: z.string().nullable(),
+  features: z.array(z.string()),
+  photos: z.array(z.string()),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
+/** Type export for client-side usage */
+export type ListingOutput = z.infer<typeof listingOutputSchema>;
+
+/** List response schema */
+const listResponseSchema = z.object({
+  listings: z.array(listingOutputSchema),
+  total: z.number(),
+});
+
+/** Type for list response */
+export type ListingsResponse = z.infer<typeof listResponseSchema>;
+
 // Helper to get user's organization
 async function getUserOrganization(supabase: SupabaseClient, userId: string) {
   // First get the user from users table by supabase_id
@@ -45,11 +81,16 @@ async function getUserOrganization(supabase: SupabaseClient, userId: string) {
 }
 
 // Helper to fetch photos from media_assets for a listing
+// Note: listingId is validated as UUID by zod, so SQL injection is prevented
 async function getListingPhotos(supabase: SupabaseClient, listingId: string): Promise<string[]> {
+  // Escape special SQL LIKE characters for defense in depth
+  // Even though listingId is UUID-validated, this protects against future changes
+  const safeListingId = listingId.replace(/[%_\\]/g, "\\$&");
+
   const { data: mediaAssets } = await supabase
     .from("media_assets")
     .select("storage_url")
-    .like("storage_key", `%${listingId}%`)
+    .like("storage_key", `%${safeListingId}%`)
     .eq("file_type", "image")
     .order("created_at", { ascending: true });
 
@@ -94,8 +135,27 @@ export const listingRouter = createTRPCRouter({
 
       if (error) throw error;
 
-      // Map backend schema to frontend expected format
-      const listings = (data || []).map((p: any) => ({
+      // Database row type from Supabase query
+      interface PropertyListingRow {
+        id: string;
+        address_line1: string;
+        city: string;
+        state: string;
+        zip_code: string | null;
+        listing_price: number | null;
+        bedrooms: number | null;
+        bathrooms: number | null;
+        square_feet: number | null;
+        property_type: string | null;
+        listing_status: string | null;
+        positioning_notes: string | null;
+        features: string[] | null;
+        created_at: string;
+        updated_at: string;
+      }
+
+      // Map backend schema to frontend expected format with proper typing
+      const listings: ListingOutput[] = (data || []).map((p: PropertyListingRow) => ({
         id: p.id,
         user_id: org.dbUserId, // for compatibility
         address: p.address_line1,
@@ -166,19 +226,24 @@ export const listingRouter = createTRPCRouter({
   create: protectedProcedure
     .input(
       z.object({
-        address: z.string().min(1),
-        city: z.string().min(1),
-        state: z.string().min(1),
-        zip: z.string().min(1),
-        price: z.number().positive(),
-        bedrooms: z.number().int().min(0),
-        bathrooms: z.number().min(0),
-        sqft: z.number().int().positive(),
+        // Address fields with reasonable max lengths to prevent DoS/storage attacks
+        address: z.string().min(1).max(500),
+        city: z.string().min(1).max(100),
+        state: z.string().min(1).max(50),
+        zip: z.string().min(1).max(20),
+        // Price with reasonable bounds (max ~$1 trillion)
+        price: z.number().positive().max(999999999999),
+        bedrooms: z.number().int().min(0).max(100),
+        bathrooms: z.number().min(0).max(100),
+        sqft: z.number().int().positive().max(10000000), // Max 10M sqft
         property_type: propertyTypeEnum,
         status: listingStatusEnum.default("for_sale"),
-        description: z.string().optional(),
-        features: z.array(z.string()).default([]),
-        photos: z.array(z.string().url()).default([]),
+        // Description with reasonable max length for rich text
+        description: z.string().max(10000).optional(),
+        // Features: max 50 features, each max 100 chars
+        features: z.array(z.string().max(100)).max(50).default([]),
+        // Photos: max 100 photos, validated URLs with max length
+        photos: z.array(z.string().url().max(2048)).max(100).default([]),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -265,19 +330,20 @@ export const listingRouter = createTRPCRouter({
     .input(
       z.object({
         id: z.string().uuid(),
-        address: z.string().min(1).optional(),
-        city: z.string().min(1).optional(),
-        state: z.string().min(1).optional(),
-        zip: z.string().min(1).optional(),
-        price: z.number().positive().optional(),
-        bedrooms: z.number().int().min(0).optional(),
-        bathrooms: z.number().min(0).optional(),
-        sqft: z.number().int().positive().optional(),
+        // Same validation as create - max lengths to prevent DoS/storage attacks
+        address: z.string().min(1).max(500).optional(),
+        city: z.string().min(1).max(100).optional(),
+        state: z.string().min(1).max(50).optional(),
+        zip: z.string().min(1).max(20).optional(),
+        price: z.number().positive().max(999999999999).optional(),
+        bedrooms: z.number().int().min(0).max(100).optional(),
+        bathrooms: z.number().min(0).max(100).optional(),
+        sqft: z.number().int().positive().max(10000000).optional(),
         property_type: propertyTypeEnum.optional(),
         status: listingStatusEnum.optional(),
-        description: z.string().nullable().optional(),
-        features: z.array(z.string()).optional(),
-        photos: z.array(z.string().url()).optional(),
+        description: z.string().max(10000).nullable().optional(),
+        features: z.array(z.string().max(100)).max(50).optional(),
+        photos: z.array(z.string().url().max(2048)).max(100).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -374,7 +440,8 @@ export const listingRouter = createTRPCRouter({
     .input(
       z.object({
         id: z.string().uuid(),
-        photos: z.array(z.string().url()),
+        // Validate photo URLs with length limits
+        photos: z.array(z.string().url().max(2048)).max(100),
       })
     )
     .mutation(async ({ ctx, input }) => {

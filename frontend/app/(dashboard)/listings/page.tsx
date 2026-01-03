@@ -5,6 +5,7 @@ import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { isValidImageUrl, sanitizeImageUrl } from "@/lib/utils";
 import {
   Plus,
   Home,
@@ -17,39 +18,24 @@ import {
   Trash2,
 } from "lucide-react";
 
-// Type definition for proper TypeScript inference
-interface Listing {
-  id: string;
-  address: string;
-  city: string;
-  state: string;
-  zip: string;
-  price: number;
-  bedrooms: number;
-  bathrooms: number;
-  sqft: number;
-  status: string;
-  photos: string[] | null;
-  features: string[] | null;
-}
-
+// Status filter options - matches backend listingStatusEnum
 const STATUS_FILTERS = [
   { value: "all", label: "All" },
-  { value: "active", label: "Active" },
+  { value: "for_sale", label: "For Sale" },
   { value: "pending", label: "Pending" },
   { value: "sold", label: "Sold" },
-];
+] as const;
+
+type StatusFilterValue = "all" | "for_sale" | "pending" | "sold" | "withdrawn" | "active";
 
 export default function ListingsPage() {
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("all");
 
-  const { data: listingsRaw, isLoading, refetch } = trpc.listing.list.useQuery({
-    status: statusFilter === "all" ? undefined : statusFilter as "active" | "pending" | "sold" | "withdrawn",
+  // tRPC provides proper type inference - no manual casting needed
+  const { data: listingsData, isLoading, refetch } = trpc.listing.list.useQuery({
+    status: statusFilter === "all" ? undefined : statusFilter,
     limit: 50,
   });
-
-  // Cast for proper TypeScript inference
-  const listingsData = listingsRaw as { listings: Listing[]; total: number } | undefined;
 
   const deleteListing = trpc.listing.delete.useMutation({
     onSuccess: () => refetch(),
@@ -118,13 +104,21 @@ export default function ListingsPage() {
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {listingsData.listings.map((listing) => (
             <Card key={listing.id} className="overflow-hidden group">
-              {/* Photo */}
+              {/* Photo - XSS-safe image rendering */}
               <div className="aspect-video bg-muted relative">
-                {listing.photos && listing.photos.length > 0 ? (
+                {listing.photos &&
+                listing.photos.length > 0 &&
+                isValidImageUrl(listing.photos[0]) ? (
                   <img
-                    src={listing.photos[0]}
+                    src={sanitizeImageUrl(listing.photos[0])}
                     alt={listing.address}
                     className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                    loading="lazy"
+                    onError={(e) => {
+                      // Hide broken images gracefully
+                      (e.target as HTMLImageElement).style.display = "none";
+                    }}
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center">

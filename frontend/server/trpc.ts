@@ -2,16 +2,26 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { ZodError } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { User } from "@supabase/supabase-js";
+import type { User, SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/lib/supabase/types";
 
-// Use 'any' for supabase to avoid complex type inference issues with tRPC context
-// The actual types are defined in lib/supabase/types.ts but don't flow through tRPC properly
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseAny = any;
+/**
+ * Typed Supabase client for use in tRPC procedures.
+ *
+ * This provides full type safety for database operations within tRPC routes,
+ * including autocomplete for table names and column types.
+ */
+export type TypedSupabaseClient = SupabaseClient<Database>;
 
-// Explicitly type the context
-interface TRPCContext {
-  supabase: SupabaseAny;
+/**
+ * tRPC context available in all procedures.
+ *
+ * @property supabase - Typed Supabase client for database operations
+ * @property user - Authenticated user or null for public routes
+ * @property headers - Request headers for accessing cookies, auth tokens, etc.
+ */
+export interface TRPCContext {
+  supabase: TypedSupabaseClient;
   user: User | null;
   headers: Headers;
 }

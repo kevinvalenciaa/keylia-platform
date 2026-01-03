@@ -8,6 +8,9 @@ interface CookieToSet {
   options?: CookieOptions;
 }
 
+// Timeout for Supabase operations (10 seconds)
+const SUPABASE_TIMEOUT_MS = 10000;
+
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
@@ -31,6 +34,14 @@ export async function updateSession(request: NextRequest) {
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
           );
+        },
+      },
+      global: {
+        fetch: (url, options) => {
+          return fetch(url, {
+            ...options,
+            signal: AbortSignal.timeout(SUPABASE_TIMEOUT_MS),
+          });
         },
       },
     }

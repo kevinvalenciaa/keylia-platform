@@ -286,3 +286,93 @@ export type TransitionType =
   | "fade_white"
   | "slide_left"
   | "slide_right";
+
+// Webhook events for idempotency tracking
+export interface WebhookEvent extends BaseEntity {
+  stripe_event_id: string;
+  event_type: string;
+  processed_at: string;
+}
+
+/**
+ * Supabase Database type definition for type-safe queries.
+ * This is a simplified version - for full type safety, generate
+ * types using `supabase gen types typescript`.
+ */
+export interface Database {
+  public: {
+    Tables: {
+      users: {
+        Row: User;
+        Insert: Omit<User, "id" | "created_at" | "updated_at">;
+        Update: Partial<Omit<User, "id">>;
+      };
+      organizations: {
+        Row: Organization;
+        Insert: Omit<Organization, "id" | "created_at" | "updated_at">;
+        Update: Partial<Omit<Organization, "id">>;
+      };
+      organization_members: {
+        Row: OrganizationMember;
+        Insert: OrganizationMember;
+        Update: Partial<OrganizationMember>;
+      };
+      property_listings: {
+        Row: PropertyListing;
+        Insert: Omit<PropertyListing, "id" | "created_at" | "updated_at">;
+        Update: Partial<Omit<PropertyListing, "id">>;
+      };
+      projects: {
+        Row: Project;
+        Insert: Omit<Project, "id" | "created_at" | "updated_at">;
+        Update: Partial<Omit<Project, "id">>;
+      };
+      media_assets: {
+        Row: MediaAsset;
+        Insert: Omit<MediaAsset, "id" | "created_at" | "updated_at">;
+        Update: Partial<Omit<MediaAsset, "id">>;
+      };
+      render_jobs: {
+        Row: RenderJob;
+        Insert: Omit<RenderJob, "id" | "created_at" | "updated_at">;
+        Update: Partial<Omit<RenderJob, "id">>;
+      };
+      brand_kits: {
+        Row: BrandKit;
+        Insert: Omit<BrandKit, "id" | "created_at" | "updated_at">;
+        Update: Partial<Omit<BrandKit, "id">>;
+      };
+      subscriptions: {
+        Row: Subscription;
+        Insert: Omit<Subscription, "id" | "created_at" | "updated_at">;
+        Update: Partial<Omit<Subscription, "id">>;
+      };
+      scenes: {
+        Row: Scene;
+        Insert: Omit<Scene, "id" | "created_at" | "updated_at">;
+        Update: Partial<Omit<Scene, "id">>;
+      };
+      webhook_events: {
+        Row: WebhookEvent;
+        Insert: Omit<WebhookEvent, "id" | "created_at" | "updated_at">;
+        Update: Partial<Omit<WebhookEvent, "id">>;
+      };
+    };
+    Views: Record<string, never>;
+    Functions: {
+      increment_video_renders_usage: {
+        Args: {
+          p_organization_id: string;
+          p_increment_by?: number;
+        };
+        Returns: {
+          success: boolean;
+          new_count: number;
+          limit_value: number | null;
+          remaining: number | null;
+        }[];
+      };
+    };
+    Enums: Record<string, never>;
+  };
+}
