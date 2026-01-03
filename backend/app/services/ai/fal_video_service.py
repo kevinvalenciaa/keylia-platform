@@ -1,6 +1,7 @@
 """fal.ai video generation service."""
 
 import asyncio
+import logging
 from enum import Enum
 from typing import Any, Optional
 
@@ -8,6 +9,8 @@ import fal_client
 from pydantic import BaseModel
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class VideoModel(str, Enum):
@@ -171,7 +174,7 @@ class FalVideoService:
         successful_results = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                print(f"Scene {i} generation failed: {result}")
+                logger.warning(f"Scene {i} generation failed: {result}")
             else:
                 successful_results.append(result)
         

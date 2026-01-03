@@ -1,7 +1,6 @@
 """ElevenLabs TTS service for voiceover generation."""
 
 import asyncio
-import tempfile
 from dataclasses import dataclass
 from typing import Any
 

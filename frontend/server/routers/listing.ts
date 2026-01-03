@@ -14,9 +14,6 @@ const listingStatusEnum = z.enum(["for_sale", "pending", "sold", "withdrawn", "a
 
 // Helper to get user's organization
 async function getUserOrganization(supabase: any, userId: string) {
-  // DEBUG: Log what we're searching for
-  console.log("🔍 getUserOrganization called with userId:", userId);
-
   // First get the user from users table by supabase_id
   const { data: user, error: userError } = await supabase
     .from("users")
@@ -24,26 +21,17 @@ async function getUserOrganization(supabase: any, userId: string) {
     .eq("supabase_id", userId)
     .single();
 
-  // DEBUG: Log the result
-  console.log("🔍 User lookup result:", { user, userError });
-
   if (userError || !user) {
-    // DEBUG: Try to find all users to see what's in the DB
-    const { data: allUsers } = await supabase.from("users").select("id, supabase_id, email").limit(5);
-    console.log("🔍 All users in DB:", allUsers);
     return null;
   }
 
   // Get user's organization membership
-  console.log("🔍 Looking for membership with user_id:", user.id);
   const { data: membership, error: memberError } = await supabase
     .from("organization_members")
     .select("organization_id")
     .eq("user_id", user.id)
     .limit(1)
     .single();
-
-  console.log("🔍 Membership lookup result:", { membership, memberError });
 
   if (memberError || !membership) {
     return null;
@@ -234,18 +222,13 @@ export const listingRouter = createTRPCRouter({
           processing_status: "completed",
         }));
 
-        console.log("📸 Saving media assets:", mediaAssets.length, "photos for listing", listingId);
-
-        const { data: insertedMedia, error: mediaError } = await ctx.supabase
+        const { error: mediaError } = await ctx.supabase
           .from("media_assets")
           .insert(mediaAssets)
           .select();
 
         if (mediaError) {
-          console.error("❌ Failed to save media assets:", mediaError);
           // Don't throw - listing was created, just photos weren't linked
-        } else {
-          console.log("✅ Saved media assets:", insertedMedia?.length || 0, "photos");
         }
       }
 

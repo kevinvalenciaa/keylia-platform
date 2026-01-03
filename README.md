@@ -4,8 +4,6 @@
 
 Transform property photos into scroll-stopping social media videos and graphics in minutes—no editing skills required.
 
-![ReelEstate Studio](docs/assets/hero.png)
-
 ## Features
 
 ### 🎬 Listing Tour Videos
@@ -125,7 +123,7 @@ For detailed step-by-step instructions, see **[SETUP.md](./SETUP.md)**.
 ## Project Structure
 
 ```
-reelestate-studio/
+keylia-platform/
 ├── docs/                    # Documentation
 │   ├── 01-PRODUCT-SPECIFICATION.md
 │   ├── 02-SYSTEM-ARCHITECTURE.md

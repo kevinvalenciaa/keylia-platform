@@ -3,7 +3,7 @@
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +14,7 @@ from app.database import get_db
 from app.models.project import Project, Scene
 from app.models.render import RenderJob, RenderStatus, RenderType
 from app.models.user import User
-from app.workers.tasks.fal_video import fal_generate_video_task, fal_generate_property_tour_task
+from app.workers.tasks.fal_video import fal_generate_video_task
 from app.workers.tasks.render_video import render_video_task
 
 router = APIRouter()

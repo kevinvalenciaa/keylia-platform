@@ -84,7 +84,7 @@ Using Supabase eliminates the need to run PostgreSQL locally. This is the easies
 ### Step 3: Clone and Navigate
 
 ```bash
-cd /Users/kevinvalencia/keylia-platform
+cd keylia-platform
 ```
 
 ### Step 4: Start Redis (or use Upstash Cloud)

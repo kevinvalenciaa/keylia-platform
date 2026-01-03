@@ -16,7 +16,7 @@ from app.api.v1.auth import get_current_user
 from app.api.v1.projects import get_user_organization_id
 from app.config import settings
 from app.database import get_db
-from app.models.media import MediaAsset, MediaCategory, MediaType
+from app.models.media import MediaAsset
 from app.models.user import User
 
 router = APIRouter()

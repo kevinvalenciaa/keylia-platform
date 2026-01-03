@@ -1,6 +1,6 @@
 "use client";
 
-import { Film, Zap, Star, Sparkles } from "lucide-react";
+import { Film, Zap, Star } from "lucide-react";
 
 export type VideoModelType = "kling" | "kling_pro" | "kling_v2" | "veo3" | "veo3_fast" | "minimax" | "runway";
 

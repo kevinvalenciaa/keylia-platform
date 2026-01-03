@@ -2,6 +2,7 @@
 
 import asyncio
 import io
+import logging
 import os
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -12,12 +13,12 @@ from uuid import UUID
 import boto3
 import httpx
 from botocore.config import Config as BotoConfig
-from celery import shared_task
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.workers.celery_app import celery_app
+
+logger = logging.getLogger(__name__)
 
 # Maximum parallel video generations
 MAX_PARALLEL_VIDEO_GENERATIONS = 5
@@ -349,7 +350,7 @@ IMPORTANT: The example narrations above show the EXACT casual tone I need. Write
     )
 
     response_text = response.content[0].text
-    print(f"[DEBUG] Raw Anthropic response: {response_text[:500]}")
+    logger.debug(f"Raw Anthropic response: {response_text[:500]}")
 
     # Try to parse as-is first
     try:
@@ -445,7 +446,7 @@ def ensure_minimum_image_size(image_url: str, min_size: int = 300) -> str:
         client = get_http_client()
         response = client.get(image_url)
         if response.status_code != 200:
-            print(f"[DEBUG] Failed to fetch image: {response.status_code}")
+            logger.warning(f"Failed to fetch image: {response.status_code}")
             return image_url
 
         img = Image.open(io.BytesIO(response.content))
@@ -460,7 +461,7 @@ def ensure_minimum_image_size(image_url: str, min_size: int = 300) -> str:
         new_width = int(width * scale)
         new_height = int(height * scale)
 
-        print(f"[DEBUG] Upscaling image from {width}x{height} to {new_width}x{new_height}")
+        logger.debug(f"Upscaling image from {width}x{height} to {new_width}x{new_height}")
         img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
         # Convert to RGB if needed (for JPEG)
@@ -476,7 +477,7 @@ def ensure_minimum_image_size(image_url: str, min_size: int = 300) -> str:
         b64_data = base64.b64encode(img_bytes).decode('utf-8')
         return f"data:image/jpeg;base64,{b64_data}"
     except Exception as e:
-        print(f"[DEBUG] Image processing error: {e}")
+        logger.warning(f"Image processing error: {e}")
         return image_url
 
 
@@ -612,8 +613,8 @@ unnatural motion, morphing, warping, glitches"""
             "aspect_ratio": "9:16",
         }
 
-    print(f"[DEBUG] Using video model: {model_id}")
-    print(f"[DEBUG] Cinematic prompt: {prompt[:200]}...")
+    logger.debug(f"Using video model: {model_id}")
+    logger.debug(f"Cinematic prompt: {prompt[:200]}...")
     handler = fal_client.submit(model_id, arguments=arguments)
     result = handler.get()
 
