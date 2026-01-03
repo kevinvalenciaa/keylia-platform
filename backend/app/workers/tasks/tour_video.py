@@ -1,39 +1,34 @@
 """Tour video generation Celery tasks."""
 
-import asyncio
 import io
 import logging
 import os
+import shlex
 import tempfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-import boto3
 import httpx
-from botocore.config import Config as BotoConfig
 from sqlalchemy.orm import Session
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 
 from app.config import settings
+from app.services.sanitization import sanitize_listing_data, sanitize_style_settings
 from app.workers.celery_app import celery_app
+from app.workers.database import get_sync_db
 
 logger = logging.getLogger(__name__)
 
 # Maximum parallel video generations
 MAX_PARALLEL_VIDEO_GENERATIONS = 5
-
-
-def get_sync_db():
-    """Get synchronous database session for Celery tasks."""
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    # Convert async URL to sync
-    sync_url = settings.DATABASE_URL.replace("+asyncpg", "")
-    engine = create_engine(sync_url)
-    SessionLocal = sessionmaker(bind=engine)
-    return SessionLocal()
 
 
 def update_render_job(db: Session, render_job_id: str, **kwargs):
@@ -83,7 +78,7 @@ def generate_tour_video_task(
     Main orchestration task for tour video generation.
 
     Pipeline:
-    1. Generate script from listing data (OpenAI)
+    1. Generate script from listing data (Anthropic Claude)
     2. Generate voiceover from script (ElevenLabs)
     3. Generate video clips for each scene (fal.ai)
     4. Composite final video with audio (FFmpeg)
@@ -240,16 +235,25 @@ def generate_tour_video_task(
 
 
 def generate_script_sync(listing_data: dict, scenes_data: list, style_settings: dict) -> dict:
-    """Generate script using Anthropic Claude."""
+    """
+    Generate script using Anthropic Claude.
+
+    Sanitizes all user input before constructing prompts to prevent
+    prompt injection attacks.
+    """
     import anthropic
     import json
     import re
 
+    # Sanitize user-provided data before using in prompts
+    safe_listing = sanitize_listing_data(listing_data)
+    safe_style = sanitize_style_settings(style_settings)
+
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
     scene_count = len(scenes_data)
-    tone = style_settings.get("tone", "modern")
-    duration_seconds = style_settings.get("duration_seconds", 30)
+    tone = safe_style.get("tone", "modern")
+    duration_seconds = safe_style.get("duration_seconds", 30)
 
     # Calculate optimal word counts based on duration
     # Social media voiceover pace: ~2.5 words/second
@@ -271,7 +275,7 @@ def generate_script_sync(listing_data: dict, scenes_data: list, style_settings: 
     }
 
     # Format price nicely (must be before system_prompt which uses it)
-    price = listing_data.get('price', 0) or 0
+    price = safe_listing.get('price', 0) or 0
     if price >= 1000000:
         price_str = f"${price/1000000:.1f}M".replace('.0M', 'M')
     elif price > 0:
@@ -316,26 +320,35 @@ Start with ONE of these hook styles:
 Output ONLY raw JSON. No markdown."""
 
     # Format square feet
-    sqft = listing_data.get('square_feet', 0)
+    sqft = safe_listing.get('square_feet', safe_listing.get('sqft', 0))
     sqft_str = f"{sqft:,}" if sqft else "spacious"
 
+    # Extract safe values for prompt
+    address = safe_listing.get('address', 'Amazing Property')
+    bedrooms = safe_listing.get('bedrooms', '?')
+    bathrooms = safe_listing.get('bathrooms', '?')
+    neighborhood = safe_listing.get('neighborhood', safe_listing.get('city', ''))
+    city = safe_listing.get('city', 'the city')
+    features = safe_listing.get('features', [])[:3]
+    features_str = ', '.join(features) if features else 'great layout'
+
     user_prompt = f"""Listing:
-Address: {listing_data.get('address', 'Amazing Property')}
-Price: {price_str} | {listing_data.get('bedrooms', '?')}bd/{listing_data.get('bathrooms', '?')}ba | {sqft_str}sqft
-Location: {listing_data.get('neighborhood', listing_data.get('city', ''))}
-Features: {', '.join(listing_data.get('features', [])[:3]) or 'great layout'}
+Address: {address}
+Price: {price_str} | {bedrooms}bd/{bathrooms}ba | {sqft_str}sqft
+Location: {neighborhood}
+Features: {features_str}
 
 Write {scene_count} scenes for a {duration_seconds}s video. Return JSON:
 {{
-    "hook": "POV: you just found your dream home in {listing_data.get('neighborhood', listing_data.get('city', 'the city'))}",
+    "hook": "POV: you just found your dream home in {neighborhood or city}",
     "scenes": [
         {{"scene_number": 1, "narration": "Okay {price_str} for this?? Let me show you around..."}},
         {{"scene_number": 2, "narration": "The kitchen is giving everything it needs to give..."}},
         {{"scene_number": 3, "narration": "And don't even get me started on this view..."}}
     ],
     "cta": "Save this and DM me if you want more details",
-    "caption": "Found this gem in [area] and I'm obsessed. {price_str} for [X]beds - thoughts?? 👀",
-    "hashtags": ["realestate", "{listing_data.get('city', 'home').lower().replace(' ', '')}", "housetour", "dreamhome", "fyp"]
+    "caption": "Found this gem in [area] and I'm obsessed. {price_str} for [X]beds - thoughts??",
+    "hashtags": ["realestate", "{city.lower().replace(' ', '')}", "housetour", "dreamhome", "fyp"]
 }}
 
 IMPORTANT: The example narrations above show the EXACT casual tone I need. Write similar vibes but for THIS specific property. Never use "Welcome to" or formal language."""
@@ -378,10 +391,19 @@ IMPORTANT: The example narrations above show the EXACT casual tone I need. Write
     raise ValueError(f"Could not parse JSON from Anthropic response: {response_text[:200]}")
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=30),
+    retry=retry_if_exception_type((httpx.TimeoutException, httpx.NetworkError, httpx.ConnectError)),
+    reraise=True,
+)
 def generate_voiceover_sync(text: str, voice_settings: dict) -> dict:
-    """Generate voiceover using ElevenLabs."""
-    import httpx
+    """
+    Generate voiceover using ElevenLabs.
 
+    Includes retry logic for transient network failures.
+    Will retry up to 3 times with exponential backoff.
+    """
     voice_id = voice_settings.get("voice_id") or "21m00Tcm4TlvDq8ikWAM"  # Rachel default
 
     headers = {
@@ -422,15 +444,23 @@ def generate_voiceover_sync(text: str, voice_settings: dict) -> dict:
         }
 
 
-# Global HTTP client for reuse (connection pooling)
-_http_client = None
+# Thread-local HTTP client storage for worker safety
+_http_client_local = threading.local()
+
 
 def get_http_client() -> httpx.Client:
-    """Get a reusable HTTP client with connection pooling."""
-    global _http_client
-    if _http_client is None:
-        _http_client = httpx.Client(timeout=60.0, limits=httpx.Limits(max_connections=10))
-    return _http_client
+    """
+    Get a thread-local HTTP client with connection pooling.
+
+    Uses thread-local storage to ensure each Celery worker thread
+    gets its own client instance, avoiding shared state issues.
+    """
+    if not hasattr(_http_client_local, "client") or _http_client_local.client is None:
+        _http_client_local.client = httpx.Client(
+            timeout=60.0,
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        )
+    return _http_client_local.client
 
 
 def ensure_minimum_image_size(image_url: str, min_size: int = 300) -> str:
@@ -590,7 +620,7 @@ unnatural motion, morphing, warping, glitches"""
             "negative_prompt": negative_prompt,
             "image_url": image_url,
             "aspect_ratio": "9:16",
-            "duration": "5s",
+            "duration": "6s",
         }
     elif video_model == "minimax":
         arguments = {
@@ -615,8 +645,20 @@ unnatural motion, morphing, warping, glitches"""
 
     logger.debug(f"Using video model: {model_id}")
     logger.debug(f"Cinematic prompt: {prompt[:200]}...")
+
     handler = fal_client.submit(model_id, arguments=arguments)
-    result = handler.get()
+
+    # Wait for result (fal_client handles its own timeouts)
+    try:
+        result = handler.get()
+    except Exception as e:
+        # Attempt to cancel the job on failure/timeout
+        try:
+            handler.cancel()
+            logger.info(f"Cancelled fal.ai job after error: {e}")
+        except Exception as cancel_err:
+            logger.warning(f"Failed to cancel fal.ai job: {cancel_err}")
+        raise Exception(f"Video generation timed out or failed: {e}")
 
     return {
         "video_url": result["video"]["url"],
@@ -654,11 +696,17 @@ def composite_video_sync(
                 idx, path = future.result()
                 clip_paths[idx] = path
 
-        # Create concat file
+        # Create concat file with sanitized paths
         concat_file = os.path.join(temp_dir, "concat.txt")
         with open(concat_file, "w") as f:
             for path in clip_paths:
-                f.write(f"file '{path}'\n")
+                # Validate path is within expected directory (prevent path traversal)
+                real_path = os.path.realpath(path)
+                real_temp_dir = os.path.realpath(temp_dir)
+                if not real_path.startswith(real_temp_dir + os.sep):
+                    raise ValueError(f"Invalid clip path - potential path traversal: {path}")
+                # Use shlex.quote to safely escape the path for FFmpeg
+                f.write(f"file {shlex.quote(path)}\n")
 
         # Concatenate videos
         concat_output = os.path.join(temp_dir, "concat.mp4")
