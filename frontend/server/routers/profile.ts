@@ -4,11 +4,15 @@ import { createTRPCRouter, protectedProcedure } from "../trpc";
 export const profileRouter = createTRPCRouter({
   get: protectedProcedure.query(async ({ ctx }) => {
     // Get user from users table by supabase_id
-    const { data: user, error } = await ctx.supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: userData, error } = await (ctx.supabase as any)
       .from("users")
       .select("*")
       .eq("supabase_id", ctx.user.id)
       .single();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const user = userData as any;
 
     if (error || !user) {
       // Return default profile structure if user not found
@@ -27,7 +31,8 @@ export const profileRouter = createTRPCRouter({
     }
 
     // Get subscription info from organization
-    const { data: membership } = await ctx.supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: membership } = await (ctx.supabase as any)
       .from("organization_members")
       .select("organization_id")
       .eq("user_id", user.id)
@@ -39,13 +44,15 @@ export const profileRouter = createTRPCRouter({
     let stripeCustomerId = null;
 
     if (membership) {
-      const { data: subscription } = await ctx.supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: subscription } = await (ctx.supabase as any)
         .from("subscriptions")
         .select("status, trial_end")
         .eq("organization_id", membership.organization_id)
         .single();
 
-      const { data: org } = await ctx.supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: org } = await (ctx.supabase as any)
         .from("organizations")
         .select("stripe_customer_id")
         .eq("id", membership.organization_id)
@@ -82,11 +89,15 @@ export const profileRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { data: user, error: userError } = await ctx.supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: userData, error: userError } = await (ctx.supabase as any)
         .from("users")
         .select("id")
         .eq("supabase_id", ctx.user.id)
         .single();
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const user = userData as any;
 
       if (userError || !user) {
         throw new Error("User not found");
@@ -102,7 +113,8 @@ export const profileRouter = createTRPCRouter({
       if (input.full_name !== undefined) updates.full_name = input.full_name;
       if (input.phone !== undefined) updates.phone = input.phone;
 
-      const { data, error } = await ctx.supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (ctx.supabase as any)
         .from("users")
         .update(updates)
         .eq("id", user.id)
@@ -111,25 +123,32 @@ export const profileRouter = createTRPCRouter({
 
       if (error) throw error;
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const updatedUser = data as any;
+
       return {
         id: ctx.user.id,
-        full_name: data.full_name || "",
+        full_name: updatedUser.full_name || "",
         brokerage: null,
-        phone: data.phone,
+        phone: updatedUser.phone,
         subscription_status: "trial" as const,
         stripe_customer_id: null,
         trial_ends_at: null,
-        created_at: data.created_at,
-        updated_at: data.updated_at,
+        created_at: updatedUser.created_at,
+        updated_at: updatedUser.updated_at,
       };
     }),
 
   getSubscriptionStatus: protectedProcedure.query(async ({ ctx }) => {
-    const { data: user } = await ctx.supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: userData } = await (ctx.supabase as any)
       .from("users")
       .select("id")
       .eq("supabase_id", ctx.user.id)
       .single();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const user = userData as any;
 
     if (!user) {
       return {
@@ -141,7 +160,8 @@ export const profileRouter = createTRPCRouter({
       };
     }
 
-    const { data: membership } = await ctx.supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: membership } = await (ctx.supabase as any)
       .from("organization_members")
       .select("organization_id")
       .eq("user_id", user.id)
@@ -158,13 +178,15 @@ export const profileRouter = createTRPCRouter({
       };
     }
 
-    const { data: subscription } = await ctx.supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: subscription } = await (ctx.supabase as any)
       .from("subscriptions")
       .select("status, trial_end")
       .eq("organization_id", membership.organization_id)
       .single();
 
-    const { data: org } = await ctx.supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: org } = await (ctx.supabase as any)
       .from("organizations")
       .select("stripe_customer_id")
       .eq("id", membership.organization_id)

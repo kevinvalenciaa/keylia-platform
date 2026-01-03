@@ -2,7 +2,12 @@ import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import Stripe from "stripe";
-import type { SupabaseClient } from "@supabase/supabase-js";
+
+// Note: Using 'any' for Supabase client type because the Database types may not
+// include all tables that exist in the actual database. This is a workaround
+// until the types are regenerated from the live schema.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClient = any;
 
 /**
  * Billing Router
@@ -58,6 +63,28 @@ interface OrganizationContext {
   stripeCustomerId: string | null;
   role: string;
   isOwner: boolean;
+}
+
+// Subscription data type for queries
+// Note: This matches the actual database schema which may not be in the generated types
+interface SubscriptionData {
+  id?: string;
+  organization_id?: string;
+  stripe_subscription_id?: string | null;
+  stripe_customer_id?: string | null;
+  plan_name?: string;
+  status?: string;
+  video_renders_used?: number;
+  video_renders_limit?: number | null;
+  ai_generations_used?: number;
+  ai_generations_limit?: number | null;
+  storage_used_bytes?: number;
+  storage_limit_gb?: number;
+  team_members_limit?: number | null;
+  trial_end?: string | null;
+  current_period_end?: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 // Helper to get user's organization context
@@ -182,7 +209,8 @@ export const billingRouter = createTRPCRouter({
         customerId = customer.id;
 
         // Save customer ID to organization
-        await ctx.supabase
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (ctx.supabase as any)
           .from("organizations")
           .update({ stripe_customer_id: customerId })
           .eq("id", org.organizationId);
@@ -278,11 +306,14 @@ export const billingRouter = createTRPCRouter({
     }
 
     // Get subscription from database
-    const { data: subscription } = await ctx.supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: subscriptionData } = await (ctx.supabase as any)
       .from("subscriptions")
       .select("*")
       .eq("organization_id", org.organizationId)
       .single();
+
+    const subscription = subscriptionData as SubscriptionData | null;
 
     if (!subscription) {
       return {
@@ -299,10 +330,11 @@ export const billingRouter = createTRPCRouter({
       };
     }
 
+    const used = subscription.video_renders_used ?? 0;
+    const limit = subscription.video_renders_limit;
     const canGenerate =
       subscription.status === "active" || subscription.status === "trialing"
-        ? subscription.video_renders_limit === null ||
-          subscription.video_renders_used < subscription.video_renders_limit
+        ? limit === null || limit === undefined || used < limit
         : false;
 
     return {
@@ -334,11 +366,14 @@ export const billingRouter = createTRPCRouter({
       };
     }
 
-    const { data: subscription } = await ctx.supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: subscriptionData } = await (ctx.supabase as any)
       .from("subscriptions")
       .select("status, trial_end, video_renders_used, video_renders_limit")
       .eq("organization_id", org.organizationId)
       .single();
+
+    const subscription = subscriptionData as SubscriptionData | null;
 
     if (!subscription) {
       return {
@@ -352,7 +387,7 @@ export const billingRouter = createTRPCRouter({
 
     const isTrial = subscription.status === "trialing";
     const used = subscription.video_renders_used || 0;
-    const limit = subscription.video_renders_limit;
+    const limit = subscription.video_renders_limit ?? null;
 
     // If Stripe not configured, give unlimited access for testing
     const effectiveLimit = !stripe ? -1 : limit;
@@ -362,7 +397,7 @@ export const billingRouter = createTRPCRouter({
       limit: effectiveLimit,
       isTrial: stripe ? isTrial : false,
       trialEndsAt: subscription.trial_end,
-      canGenerate: effectiveLimit === null || effectiveLimit === -1 || used < effectiveLimit,
+      canGenerate: effectiveLimit === null || effectiveLimit === -1 || (effectiveLimit != null && used < effectiveLimit),
     };
   }),
 
@@ -381,11 +416,14 @@ export const billingRouter = createTRPCRouter({
       return { canGenerate: true, reason: null, remaining: null };
     }
 
-    const { data: subscription } = await ctx.supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: subscriptionData } = await (ctx.supabase as any)
       .from("subscriptions")
       .select("status, trial_end, video_renders_used, video_renders_limit")
       .eq("organization_id", org.organizationId)
       .single();
+
+    const subscription = subscriptionData as SubscriptionData | null;
 
     if (!subscription) {
       // No subscription = free tier with limited renders
@@ -394,13 +432,12 @@ export const billingRouter = createTRPCRouter({
 
     // Active subscribers can always generate (up to limit)
     if (subscription.status === "active") {
+      const subLimit = subscription.video_renders_limit ?? null;
+      const subUsed = subscription.video_renders_used ?? 0;
       const remaining =
-        subscription.video_renders_limit === null
+        subLimit === null
           ? null
-          : Math.max(
-              0,
-              subscription.video_renders_limit - (subscription.video_renders_used || 0)
-            );
+          : Math.max(0, subLimit - subUsed);
 
       if (remaining !== null && remaining <= 0) {
         return { canGenerate: false, reason: "limit_reached", remaining: 0 };
@@ -419,9 +456,9 @@ export const billingRouter = createTRPCRouter({
         return { canGenerate: false, reason: "trial_expired", remaining: null };
       }
 
-      const limit = subscription.video_renders_limit || 10;
-      const used = subscription.video_renders_used || 0;
-      const remaining = Math.max(0, limit - used);
+      const subLimit = subscription.video_renders_limit ?? 10;
+      const subUsed = subscription.video_renders_used ?? 0;
+      const remaining = Math.max(0, subLimit - subUsed);
 
       if (remaining <= 0) {
         return { canGenerate: false, reason: "trial_limit_reached", remaining: 0 };
@@ -460,7 +497,8 @@ export const billingRouter = createTRPCRouter({
 
       // Call the atomic increment function
       // This uses SELECT FOR UPDATE internally to prevent race conditions
-      const { data, error } = await ctx.supabase.rpc(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (ctx.supabase as any).rpc(
         "increment_video_renders_usage",
         {
           p_organization_id: org.organizationId,
@@ -475,7 +513,7 @@ export const billingRouter = createTRPCRouter({
             "increment_video_renders_usage function not found - using fallback"
           );
           return await fallbackIncrementUsage(
-            ctx.supabase,
+            ctx.supabase as SupabaseClient,
             org.organizationId,
             input.incrementBy
           );
@@ -521,7 +559,8 @@ export const billingRouter = createTRPCRouter({
       });
     }
 
-    const { data, error } = await ctx.supabase.rpc(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (ctx.supabase as any).rpc(
       "increment_video_renders_usage",
       {
         p_organization_id: org.organizationId,
@@ -535,7 +574,7 @@ export const billingRouter = createTRPCRouter({
           "increment_video_renders_usage function not found - using fallback"
         );
         const fallbackResult = await fallbackIncrementUsage(
-          ctx.supabase,
+          ctx.supabase as SupabaseClient,
           org.organizationId,
           1
         );
@@ -570,9 +609,33 @@ export const billingRouter = createTRPCRouter({
 });
 
 /**
- * Fallback for when the atomic function doesn't exist yet.
- * WARNING: This has a race condition but allows the app to work
- * before migrations are run.
+ * Maximum number of retry attempts for optimistic locking.
+ */
+const MAX_RETRY_ATTEMPTS = 3;
+
+/**
+ * Delay between retry attempts in milliseconds.
+ */
+const RETRY_DELAY_MS = 100;
+
+/**
+ * Sleep utility for retry delays with exponential backoff.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Fallback for when the atomic database function doesn't exist yet.
+ *
+ * Uses optimistic locking with retry to prevent race conditions:
+ * 1. Read current value and updated_at timestamp
+ * 2. Check limit
+ * 3. Update with WHERE clause matching the original updated_at
+ * 4. If no rows affected (concurrent modification), retry
+ *
+ * This ensures that concurrent requests don't exceed limits, even without
+ * the PostgreSQL atomic function.
  */
 async function fallbackIncrementUsage(
   supabase: SupabaseClient,
@@ -585,56 +648,115 @@ async function fallbackIncrementUsage(
   limit: number | null;
   remaining: number | null;
 }> {
-  const { data: subscription } = await supabase
-    .from("subscriptions")
-    .select("video_renders_used, video_renders_limit, status")
-    .eq("organization_id", organizationId)
-    .single();
+  for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++) {
+    // Read current state with updated_at for optimistic locking
+    const { data: subscription, error: readError } = await supabase
+      .from("subscriptions")
+      .select("video_renders_used, video_renders_limit, status, updated_at")
+      .eq("organization_id", organizationId)
+      .single();
 
-  if (!subscription) {
+    if (readError || !subscription) {
+      return {
+        success: false,
+        reason: "no_subscription",
+        newCount: 0,
+        limit: 0,
+        remaining: 0,
+      };
+    }
+
+    if (subscription.status !== "active" && subscription.status !== "trialing") {
+      return {
+        success: false,
+        reason: "inactive",
+        newCount: 0,
+        limit: 0,
+        remaining: 0,
+      };
+    }
+
+    const currentUsed = subscription.video_renders_used || 0;
+    const limit = subscription.video_renders_limit;
+    const originalUpdatedAt = subscription.updated_at;
+
+    // Check limit before attempting update
+    if (limit !== null && currentUsed + incrementBy > limit) {
+      return {
+        success: false,
+        reason: "limit_reached",
+        newCount: currentUsed,
+        limit: limit,
+        remaining: Math.max(0, limit - currentUsed),
+      };
+    }
+
+    const newCount = currentUsed + incrementBy;
+    const newUpdatedAt = new Date().toISOString();
+
+    // Optimistic lock: only update if updated_at hasn't changed
+    // This prevents race conditions by failing if another request modified the row
+    const { data: updateResult, error: updateError } = await supabase
+      .from("subscriptions")
+      .update({
+        video_renders_used: newCount,
+        updated_at: newUpdatedAt,
+      })
+      .eq("organization_id", organizationId)
+      .eq("updated_at", originalUpdatedAt)
+      .select("video_renders_used")
+      .maybeSingle();
+
+    if (updateError) {
+      console.error("Billing update error:", updateError);
+      // On database error, don't retry - fail fast
+      return {
+        success: false,
+        reason: "update_failed",
+        newCount: currentUsed,
+        limit,
+        remaining: limit === null ? null : Math.max(0, limit - currentUsed),
+      };
+    }
+
+    // If updateResult is null, the row was modified concurrently (optimistic lock failed)
+    if (!updateResult) {
+      console.warn(
+        `Optimistic lock failed for org ${organizationId}, attempt ${attempt + 1}/${MAX_RETRY_ATTEMPTS}`
+      );
+
+      // Wait before retrying with exponential backoff
+      if (attempt < MAX_RETRY_ATTEMPTS - 1) {
+        await sleep(RETRY_DELAY_MS * Math.pow(2, attempt));
+        continue;
+      }
+
+      // All retries exhausted - likely high contention, fail safely
+      return {
+        success: false,
+        reason: "concurrent_modification",
+        newCount: currentUsed,
+        limit,
+        remaining: limit === null ? null : Math.max(0, limit - currentUsed),
+      };
+    }
+
+    // Success! The update went through
     return {
-      success: false,
-      reason: "no_subscription",
-      newCount: 0,
-      limit: 0,
-      remaining: 0,
+      success: true,
+      reason: null,
+      newCount,
+      limit,
+      remaining: limit === null ? null : Math.max(0, limit - newCount),
     };
   }
 
-  if (subscription.status !== "active" && subscription.status !== "trialing") {
-    return {
-      success: false,
-      reason: "inactive",
-      newCount: 0,
-      limit: 0,
-      remaining: 0,
-    };
-  }
-
-  const currentUsed = subscription.video_renders_used || 0;
-  const limit = subscription.video_renders_limit;
-
-  if (limit !== null && currentUsed + incrementBy > limit) {
-    return {
-      success: false,
-      reason: "limit_reached",
-      newCount: currentUsed,
-      limit: limit,
-      remaining: Math.max(0, limit - currentUsed),
-    };
-  }
-
-  const newCount = currentUsed + incrementBy;
-  await supabase
-    .from("subscriptions")
-    .update({ video_renders_used: newCount })
-    .eq("organization_id", organizationId);
-
+  // Should never reach here, but TypeScript needs a return
   return {
-    success: true,
-    reason: null,
-    newCount,
-    limit,
-    remaining: limit === null ? null : Math.max(0, limit - newCount),
+    success: false,
+    reason: "max_retries_exceeded",
+    newCount: 0,
+    limit: 0,
+    remaining: 0,
   };
 }

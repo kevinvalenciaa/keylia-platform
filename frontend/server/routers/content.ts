@@ -141,7 +141,8 @@ export const contentRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Content not found" });
       }
 
-      const { data, error } = await ctx.supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (ctx.supabase as any)
         .from("projects")
         .select("*, property_listings(*), render_jobs(output_url, status)")
         .eq("id", input.id)
@@ -154,7 +155,8 @@ export const contentRouter = createTRPCRouter({
       if (error) throw error;
 
       // Get the video URL from completed render jobs
-      const renderJobs = data.render_jobs || [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const renderJobs = (data as any).render_jobs || [];
       const completedJob = renderJobs.find((job: any) => job.status === "completed" && job.output_url);
       const videoUrl = completedJob?.output_url || null;
 
@@ -198,12 +200,15 @@ export const contentRouter = createTRPCRouter({
       }
 
       // Verify listing exists and belongs to org
-      const { data: listing, error: listingError } = await ctx.supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: listingData, error: listingError } = await (ctx.supabase as any)
         .from("property_listings")
         .select("id, address_line1")
         .eq("id", input.listing_id)
         .eq("organization_id", org.organizationId)
         .single();
+
+      const listing = listingData as { id: string; address_line1: string } | null;
 
       if (listingError || !listing) {
         throw new TRPCError({
@@ -212,7 +217,8 @@ export const contentRouter = createTRPCRouter({
         });
       }
 
-      const { data, error } = await ctx.supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (ctx.supabase as any)
         .from("projects")
         .insert({
           organization_id: org.organizationId,
@@ -232,19 +238,22 @@ export const contentRouter = createTRPCRouter({
 
       if (error) throw error;
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const projectData = data as any;
+
       return {
-        id: data.id,
+        id: projectData.id,
         user_id: org.dbUserId,
-        listing_id: data.property_id,
+        listing_id: projectData.property_id,
         content_type: input.content_type,
         format: input.format,
-        caption: data.generated_caption,
-        hashtags: data.generated_hashtags || [],
+        caption: projectData.generated_caption,
+        hashtags: projectData.generated_hashtags || [],
         image_url: null,
-        status: data.status,
+        status: projectData.status,
         download_count: 0,
-        created_at: data.created_at,
-        updated_at: data.updated_at,
+        created_at: projectData.created_at,
+        updated_at: projectData.updated_at,
       };
     }),
 
@@ -273,7 +282,8 @@ export const contentRouter = createTRPCRouter({
       if (status !== undefined) updates.status = status;
       updates.updated_at = new Date().toISOString();
 
-      const { data, error } = await ctx.supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (ctx.supabase as any)
         .from("projects")
         .update(updates)
         .eq("id", id)
@@ -286,19 +296,22 @@ export const contentRouter = createTRPCRouter({
       }
       if (error) throw error;
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const projectData = data as any;
+
       return {
-        id: data.id,
+        id: projectData.id,
         user_id: org.dbUserId,
-        listing_id: data.property_id,
-        content_type: projectTypeToContentType[data.type] || "just_listed",
+        listing_id: projectData.property_id,
+        content_type: projectTypeToContentType[projectData.type] || "just_listed",
         format: "square" as const,
-        caption: data.generated_caption,
-        hashtags: data.generated_hashtags || [],
+        caption: projectData.generated_caption,
+        hashtags: projectData.generated_hashtags || [],
         image_url: null,
-        status: data.status,
+        status: projectData.status,
         download_count: 0,
-        created_at: data.created_at,
-        updated_at: data.updated_at,
+        created_at: projectData.created_at,
+        updated_at: projectData.updated_at,
       };
     }),
 

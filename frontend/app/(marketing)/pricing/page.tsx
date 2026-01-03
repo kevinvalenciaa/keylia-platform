@@ -55,7 +55,7 @@ export default function PricingPage() {
 
     try {
       const { url } = await createCheckout.mutateAsync({
-        planId: planId as "starter" | "pro",
+        planId: planId as "starter" | "professional" | "team",
       });
 
       if (url) {

@@ -237,7 +237,7 @@ export default function DashboardPage() {
                       {usage.used} / {usage.limit === -1 ? "Unlimited" : usage.limit}
                     </span>
                   </div>
-                  {usage.limit !== -1 && (
+                  {usage.limit !== -1 && usage.limit != null && usage.limit > 0 && (
                     <div className="h-2 bg-muted rounded-full overflow-hidden">
                       <div
                         className="h-full bg-primary rounded-full transition-all"

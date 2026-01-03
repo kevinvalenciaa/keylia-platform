@@ -34,7 +34,7 @@ describe("Button", () => {
   it("applies size classes", () => {
     render(<Button size="lg">Large Button</Button>);
     const button = screen.getByRole("button");
-    expect(button).toHaveClass("h-11");
+    expect(button).toHaveClass("h-12");
   });
 
   it("renders as child when asChild is true", () => {

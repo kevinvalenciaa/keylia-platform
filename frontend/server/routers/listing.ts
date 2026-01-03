@@ -186,7 +186,8 @@ export const listingRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Listing not found" });
       }
 
-      const { data, error } = await ctx.supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (ctx.supabase as any)
         .from("property_listings")
         .select("*")
         .eq("id", input.id)
@@ -201,25 +202,28 @@ export const listingRouter = createTRPCRouter({
       // Fetch photos from media_assets
       const photos = await getListingPhotos(ctx.supabase, input.id);
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const listing = data as any;
+
       // Map to frontend format
       return {
-        id: data.id,
+        id: listing.id,
         user_id: org.dbUserId,
-        address: data.address_line1,
-        city: data.city,
-        state: data.state,
-        zip: data.zip_code || "",
-        price: data.listing_price || 0,
-        bedrooms: data.bedrooms || 0,
-        bathrooms: data.bathrooms || 0,
-        sqft: data.square_feet || 0,
-        property_type: data.property_type || "single_family",
-        status: data.listing_status || "active",
-        description: data.positioning_notes,
-        features: data.features || [],
+        address: listing.address_line1,
+        city: listing.city,
+        state: listing.state,
+        zip: listing.zip_code || "",
+        price: listing.listing_price || 0,
+        bedrooms: listing.bedrooms || 0,
+        bathrooms: listing.bathrooms || 0,
+        sqft: listing.square_feet || 0,
+        property_type: listing.property_type || "single_family",
+        status: listing.listing_status || "active",
+        description: listing.positioning_notes,
+        features: listing.features || [],
         photos,
-        created_at: data.created_at,
-        updated_at: data.updated_at,
+        created_at: listing.created_at,
+        updated_at: listing.updated_at,
       };
     }),
 
@@ -257,7 +261,8 @@ export const listingRouter = createTRPCRouter({
 
       const listingId = crypto.randomUUID();
 
-      const { data, error } = await ctx.supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (ctx.supabase as any)
         .from("property_listings")
         .insert({
           id: listingId,
@@ -294,7 +299,8 @@ export const listingRouter = createTRPCRouter({
           processing_status: "completed",
         }));
 
-        const { error: mediaError } = await ctx.supabase
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error: mediaError } = await (ctx.supabase as any)
           .from("media_assets")
           .insert(mediaAssets)
           .select();
@@ -384,7 +390,8 @@ export const listingRouter = createTRPCRouter({
       if (description !== undefined) updates.positioning_notes = description;
       if (features !== undefined) updates.features = features;
 
-      const { data, error } = await ctx.supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (ctx.supabase as any)
         .from("property_listings")
         .update(updates)
         .eq("id", id)
@@ -397,24 +404,27 @@ export const listingRouter = createTRPCRouter({
       }
       if (error) throw error;
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const listing = data as any;
+
       return {
-        id: data.id,
+        id: listing.id,
         user_id: org.dbUserId,
-        address: data.address_line1,
-        city: data.city,
-        state: data.state,
-        zip: data.zip_code || "",
-        price: data.listing_price || 0,
-        bedrooms: data.bedrooms || 0,
-        bathrooms: data.bathrooms || 0,
-        sqft: data.square_feet || 0,
-        property_type: data.property_type || "single_family",
-        status: data.listing_status || "active",
-        description: data.positioning_notes,
-        features: data.features || [],
+        address: listing.address_line1,
+        city: listing.city,
+        state: listing.state,
+        zip: listing.zip_code || "",
+        price: listing.listing_price || 0,
+        bedrooms: listing.bedrooms || 0,
+        bathrooms: listing.bathrooms || 0,
+        sqft: listing.square_feet || 0,
+        property_type: listing.property_type || "single_family",
+        status: listing.listing_status || "active",
+        description: listing.positioning_notes,
+        features: listing.features || [],
         photos: [],
-        created_at: data.created_at,
-        updated_at: data.updated_at,
+        created_at: listing.created_at,
+        updated_at: listing.updated_at,
       };
     }),
 

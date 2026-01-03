@@ -37,7 +37,7 @@ export async function updateSession(request: NextRequest) {
         },
       },
       global: {
-        fetch: (url, options) => {
+        fetch: (url: RequestInfo | URL, options?: RequestInit) => {
           return fetch(url, {
             ...options,
             signal: AbortSignal.timeout(SUPABASE_TIMEOUT_MS),

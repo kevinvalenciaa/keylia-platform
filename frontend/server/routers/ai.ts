@@ -2,12 +2,20 @@ import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { circuitBreakers, CircuitBreakerError } from "@/lib/circuit-breaker";
+import {
+  sanitizeForPrompt,
+  sanitizeArrayForPrompt,
+  createSafePropertyDescription,
+} from "@/lib/sanitization";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
 // Helper to get user's organization
+// Note: Using 'any' for supabase because the Database types may not include all tables
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getUserOrganization(supabase: any, userId: string) {
   const { data: user, error: userError } = await supabase
     .from("users")
@@ -33,7 +41,7 @@ async function getUserOrganization(supabase: any, userId: string) {
   return {
     dbUserId: user.id,
     organizationId: membership.organization_id,
-    fullName: user.full_name
+    fullName: user.full_name,
   };
 }
 
@@ -68,7 +76,10 @@ const contentTypeEnum = z.enum([
 
 const platformEnum = z.enum(["instagram", "facebook", "twitter"]);
 
-const PLATFORM_GUIDELINES: Record<string, { maxLength: string; hashtagCount: string; tone: string; format: string }> = {
+const PLATFORM_GUIDELINES: Record<
+  string,
+  { maxLength: string; hashtagCount: string; tone: string; format: string }
+> = {
   instagram: {
     maxLength: "150-200 words",
     hashtagCount: "15-20 relevant hashtags",
@@ -89,6 +100,51 @@ const PLATFORM_GUIDELINES: Record<string, { maxLength: string; hashtagCount: str
   },
 };
 
+/**
+ * Call Anthropic API with circuit breaker protection.
+ * Handles failures gracefully and prevents cascading failures.
+ */
+async function callAnthropicWithBreaker(
+  prompt: string,
+  maxTokens = 1024
+): Promise<Anthropic.Message> {
+  try {
+    return await circuitBreakers.anthropic.call(() =>
+      anthropic.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: maxTokens,
+        messages: [{ role: "user", content: prompt }],
+      })
+    );
+  } catch (error) {
+    if (error instanceof CircuitBreakerError) {
+      throw new TRPCError({
+        code: "SERVICE_UNAVAILABLE",
+        message: "AI service is temporarily unavailable. Please try again in a few minutes.",
+        cause: error,
+      });
+    }
+    throw error;
+  }
+}
+
+/**
+ * Parse JSON from AI response with validation.
+ */
+function parseJsonResponse<T>(response: Anthropic.Message): T {
+  const textContent = response.content.find((c) => c.type === "text");
+  if (!textContent || textContent.type !== "text") {
+    throw new Error("No text content in response");
+  }
+
+  const jsonMatch = textContent.text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new Error("Could not parse JSON from response");
+  }
+
+  return JSON.parse(jsonMatch[0]) as T;
+}
+
 export const aiRouter = createTRPCRouter({
   generateContent: protectedProcedure
     .input(
@@ -96,7 +152,7 @@ export const aiRouter = createTRPCRouter({
         listing_id: z.string().uuid(),
         content_type: contentTypeEnum,
         platform: platformEnum.default("instagram"),
-        additional_context: z.string().optional(),
+        additional_context: z.string().max(1000).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -126,7 +182,7 @@ export const aiRouter = createTRPCRouter({
 
       const listing = listingData as ListingData;
 
-      // Build the prompt
+      // Build the prompt with sanitized data
       const contentTypeLabels: Record<string, string> = {
         just_listed: "Just Listed",
         just_sold: "Just Sold",
@@ -143,17 +199,19 @@ export const aiRouter = createTRPCRouter({
 
       const guidelines = PLATFORM_GUIDELINES[input.platform];
 
+      // Sanitize all user-provided data before including in prompt
+      const safePropertyDescription = createSafePropertyDescription(listing);
+      const safeAgentName = sanitizeForPrompt(org.fullName, 100) || "Real Estate Agent";
+      const safeAdditionalContext = input.additional_context
+        ? sanitizeForPrompt(input.additional_context, 1000)
+        : "";
+
       const prompt = `You are a real estate social media copywriter specializing in ${platformLabels[input.platform]}. Generate engaging content for this ${contentTypeLabels[input.content_type]} post.
 
 === PROPERTY INFO ===
-Address: ${listing.address_line1}, ${listing.city}, ${listing.state} ${listing.zip_code || ""}
-Price: $${(listing.listing_price || 0).toLocaleString()}
-Details: ${listing.bedrooms || 0}bd/${listing.bathrooms || 0}ba, ${(listing.square_feet || 0).toLocaleString()} sqft
-Type: ${(listing.property_type || "home").replace("_", " ")}
-${listing.features?.length ? `Key Features: ${listing.features.join(", ")}` : ""}
-${listing.positioning_notes ? `Description: ${listing.positioning_notes}` : ""}
-Agent: ${org.fullName || "Real Estate Agent"}
-${input.additional_context ? `Additional context: ${input.additional_context}` : ""}
+${safePropertyDescription}
+Agent: ${safeAgentName}
+${safeAdditionalContext ? `Additional context: ${safeAdditionalContext}` : ""}
 
 === PLATFORM REQUIREMENTS (${platformLabels[input.platform]}) ===
 - Caption Length: ${guidelines.maxLength}
@@ -176,34 +234,13 @@ Respond in JSON format only:
 }`;
 
       try {
-        const response = await anthropic.messages.create({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1024,
-          messages: [
-            {
-              role: "user",
-              content: prompt,
-            },
-          ],
-        });
+        const response = await callAnthropicWithBreaker(prompt);
 
-        // Extract text content
-        const textContent = response.content.find((c) => c.type === "text");
-        if (!textContent || textContent.type !== "text") {
-          throw new Error("No text content in response");
-        }
-
-        // Parse JSON from response
-        const jsonMatch = textContent.text.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-          throw new Error("Could not parse JSON from response");
-        }
-
-        const generated = JSON.parse(jsonMatch[0]) as {
+        const generated = parseJsonResponse<{
           headline: string;
           caption: string;
           hashtags: string[];
-        };
+        }>(response);
 
         return {
           headline: generated.headline,
@@ -214,6 +251,8 @@ Respond in JSON format only:
           platform: input.platform,
         };
       } catch (error) {
+        if (error instanceof TRPCError) throw error;
+
         console.error("AI generation error:", error);
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
@@ -225,25 +264,32 @@ Respond in JSON format only:
   generateDescription: protectedProcedure
     .input(
       z.object({
-        address: z.string(),
-        city: z.string(),
-        state: z.string(),
-        price: z.number(),
-        bedrooms: z.number(),
-        bathrooms: z.number(),
-        sqft: z.number(),
-        property_type: z.string(),
-        features: z.array(z.string()).optional(),
+        address: z.string().max(500),
+        city: z.string().max(100),
+        state: z.string().max(50),
+        price: z.number().positive().max(999999999999),
+        bedrooms: z.number().int().min(0).max(100),
+        bathrooms: z.number().min(0).max(100),
+        sqft: z.number().int().positive().max(10000000),
+        property_type: z.string().max(50),
+        features: z.array(z.string().max(100)).max(50).optional(),
       })
     )
     .mutation(async ({ input }) => {
+      // Sanitize all inputs
+      const safeAddress = sanitizeForPrompt(input.address, 500);
+      const safeCity = sanitizeForPrompt(input.city, 100);
+      const safeState = sanitizeForPrompt(input.state, 50);
+      const safePropertyType = sanitizeForPrompt(input.property_type, 50);
+      const safeFeatures = sanitizeArrayForPrompt(input.features, 50, 100);
+
       const prompt = `Generate a compelling property description for this listing:
 
-Address: ${input.address}, ${input.city}, ${input.state}
+Address: ${safeAddress}, ${safeCity}, ${safeState}
 Price: $${input.price.toLocaleString()}
 Details: ${input.bedrooms}bd/${input.bathrooms}ba, ${input.sqft.toLocaleString()} sqft
-Property Type: ${input.property_type.replace("_", " ")}
-${input.features?.length ? `Features: ${input.features.join(", ")}` : ""}
+Property Type: ${safePropertyType.replace("_", " ")}
+${safeFeatures.length > 0 ? `Features: ${safeFeatures.join(", ")}` : ""}
 
 Write a 2-3 paragraph property description that:
 - Highlights the best features and lifestyle benefits
@@ -260,34 +306,17 @@ Respond in JSON format:
 }`;
 
       try {
-        const response = await anthropic.messages.create({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1024,
-          messages: [
-            {
-              role: "user",
-              content: prompt,
-            },
-          ],
-        });
+        const response = await callAnthropicWithBreaker(prompt);
 
-        const textContent = response.content.find((c) => c.type === "text");
-        if (!textContent || textContent.type !== "text") {
-          throw new Error("No text content in response");
-        }
-
-        const jsonMatch = textContent.text.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-          throw new Error("Could not parse JSON from response");
-        }
-
-        const generated = JSON.parse(jsonMatch[0]) as {
+        const generated = parseJsonResponse<{
           description: string;
           extracted_features: string[];
-        };
+        }>(response);
 
         return generated;
       } catch (error) {
+        if (error instanceof TRPCError) throw error;
+
         console.error("AI generation error:", error);
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
@@ -300,7 +329,7 @@ Respond in JSON format:
     .input(
       z.object({
         content_id: z.string().uuid(),
-        feedback: z.string().optional(),
+        feedback: z.string().max(500).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -331,14 +360,19 @@ Respond in JSON format:
       const project = projectData as ProjectData;
       const listing = project.property_listings as ListingData;
 
+      // Sanitize inputs
+      const safePropertyDescription = createSafePropertyDescription(listing);
+      const safeCurrentCaption = sanitizeForPrompt(project.generated_caption, 2000);
+      const safeFeedback = input.feedback
+        ? sanitizeForPrompt(input.feedback, 500)
+        : "Make it different and fresh";
+
       const prompt = `Regenerate the Instagram caption for this real estate post.
 
-Property: ${listing.address_line1}, ${listing.city}, ${listing.state}
-Price: $${(listing.listing_price || 0).toLocaleString()}
-Details: ${listing.bedrooms || 0}bd/${listing.bathrooms || 0}ba, ${(listing.square_feet || 0).toLocaleString()} sqft
-Content Type: ${project.type}
-Current Caption: ${project.generated_caption}
-${input.feedback ? `User Feedback: ${input.feedback}` : "Make it different and fresh"}
+${safePropertyDescription}
+Content Type: ${sanitizeForPrompt(project.type, 50)}
+Current Caption: ${safeCurrentCaption}
+User Feedback: ${safeFeedback}
 
 Generate a new caption (150-200 words) and updated hashtags. Make it different from the current one while maintaining professionalism.
 
@@ -349,34 +383,16 @@ Respond in JSON format:
 }`;
 
       try {
-        const response = await anthropic.messages.create({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1024,
-          messages: [
-            {
-              role: "user",
-              content: prompt,
-            },
-          ],
-        });
+        const response = await callAnthropicWithBreaker(prompt);
 
-        const textContent = response.content.find((c) => c.type === "text");
-        if (!textContent || textContent.type !== "text") {
-          throw new Error("No text content in response");
-        }
-
-        const jsonMatch = textContent.text.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-          throw new Error("Could not parse JSON from response");
-        }
-
-        const generated = JSON.parse(jsonMatch[0]) as {
+        const generated = parseJsonResponse<{
           caption: string;
           hashtags: string[];
-        };
+        }>(response);
 
         // Update the project
-        const { data: updated, error: updateError } = await ctx.supabase
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: updated, error: updateError } = await (ctx.supabase as any)
           .from("projects")
           .update({
             generated_caption: generated.caption,
@@ -396,6 +412,8 @@ Respond in JSON format:
           hashtags: updated.generated_hashtags,
         };
       } catch (error) {
+        if (error instanceof TRPCError) throw error;
+
         console.error("AI regeneration error:", error);
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
@@ -403,4 +421,19 @@ Respond in JSON format:
         });
       }
     }),
+
+  /**
+   * Get AI service health status.
+   * Useful for monitoring and debugging.
+   */
+  getServiceStatus: protectedProcedure.query(() => {
+    const stats = circuitBreakers.anthropic.getStats();
+    return {
+      status: stats.state === "CLOSED" ? "healthy" : stats.state === "HALF_OPEN" ? "recovering" : "degraded",
+      circuitState: stats.state,
+      totalCalls: stats.totalCalls,
+      totalFailures: stats.totalFailures,
+      isAvailable: circuitBreakers.anthropic.isAvailable(),
+    };
+  }),
 });
