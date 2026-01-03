@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# ReelEstate Studio - Automated Setup Script
+# Keylia - Automated Setup Script
 # This script helps set up the development environment
 
 set -e  # Exit on error
 
-echo "ReelEstate Studio - Setup Script"
-echo "===================================="
+echo "Keylia - Setup Script"
+echo "======================"
 echo ""
 
 # Colors for output

@@ -27,12 +27,12 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
-        "https://reelestate.studio",
+        "https://keylia.io",
     ]
     
     # Database (Supabase or PostgreSQL)
     # Supabase format: postgresql+asyncpg://postgres.[project-ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres
-    # Local format: postgresql+asyncpg://postgres:PASSWORD@localhost:5432/reelestate
+    # Local format: postgresql+asyncpg://postgres:PASSWORD@localhost:5432/keylia
     DATABASE_URL: str  # Required - must be set in environment
     
     # Supabase (optional - if using Supabase)
@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     AWS_ACCESS_KEY_ID: str = ""
     AWS_SECRET_ACCESS_KEY: str = ""
     AWS_REGION: str = "us-east-1"
-    S3_BUCKET_NAME: str = "reelestate-media"
+    S3_BUCKET_NAME: str = "keylia-media"
     S3_BUCKET_URL: str = ""
     
     # OpenAI (optional)

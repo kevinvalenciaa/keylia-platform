@@ -92,10 +92,15 @@ export const profileRouter = createTRPCRouter({
         throw new Error("User not found");
       }
 
-      const updates: any = {};
+      const updates: {
+        full_name?: string;
+        phone?: string;
+        updated_at: string;
+      } = {
+        updated_at: new Date().toISOString(),
+      };
       if (input.full_name !== undefined) updates.full_name = input.full_name;
       if (input.phone !== undefined) updates.phone = input.phone;
-      updates.updated_at = new Date().toISOString();
 
       const { data, error } = await ctx.supabase
         .from("users")

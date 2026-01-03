@@ -1,5 +1,5 @@
 -- =============================================================================
--- ReelEstate Studio - Seed Data (Optional)
+-- Keylia - Seed Data (Optional)
 -- =============================================================================
 -- Run this AFTER 001 and 002 migrations if you want sample data
 -- =============================================================================
@@ -59,13 +59,13 @@ DECLARE
     demo_project_id UUID;
 BEGIN
     -- Check if we're in a dev environment (you might want to add a check here)
-    -- IF current_database() != 'reelestate_dev' THEN
+    -- IF current_database() != 'keylia_dev' THEN
     --     RAISE NOTICE 'Skipping seed data - not in dev environment';
     --     RETURN;
     -- END IF;
 
     -- Skip if data already exists
-    IF EXISTS (SELECT 1 FROM users WHERE email = 'demo@reelestate.studio') THEN
+    IF EXISTS (SELECT 1 FROM users WHERE email = 'demo@keylia.io') THEN
         RAISE NOTICE 'Demo data already exists, skipping...';
         RETURN;
     END IF;
@@ -74,7 +74,7 @@ BEGIN
     INSERT INTO users (id, email, password_hash, full_name, email_verified, is_active)
     VALUES (
         uuid_generate_v4(),
-        'demo@reelestate.studio',
+        'demo@keylia.io',
         -- Password: "demo123" (bcrypt hash)
         '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.AqR5E5wC5R5wC5',
         'Demo Agent',
@@ -146,7 +146,7 @@ BEGIN
         'Demo Agent',
         'Licensed Real Estate Agent',
         'Demo Realty Group',
-        'demo@reelestate.studio',
+        'demo@keylia.io',
         '(555) 123-4567',
         '#2563eb',
         '#1e40af',
@@ -275,7 +275,7 @@ BEGIN
     RAISE NOTICE 'Created 6 demo scenes for project';
 
     RAISE NOTICE 'Demo data created successfully!';
-    RAISE NOTICE 'Demo login: demo@reelestate.studio / demo123';
+    RAISE NOTICE 'Demo login: demo@keylia.io / demo123';
 
 END $$;
 
@@ -299,7 +299,7 @@ LEFT JOIN subscriptions s ON s.organization_id = o.id
 LEFT JOIN projects p ON p.organization_id = o.id
 LEFT JOIN brand_kits bk ON bk.organization_id = o.id
 LEFT JOIN property_listings pl ON pl.organization_id = o.id
-WHERE u.email = 'demo@reelestate.studio'
+WHERE u.email = 'demo@keylia.io'
 GROUP BY u.email, o.name, s.plan_name;
 */
 

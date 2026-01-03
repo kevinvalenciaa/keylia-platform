@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 const propertyTypeEnum = z.enum([
   "single_family",
@@ -13,7 +14,7 @@ const propertyTypeEnum = z.enum([
 const listingStatusEnum = z.enum(["for_sale", "pending", "sold", "withdrawn", "active"]);
 
 // Helper to get user's organization
-async function getUserOrganization(supabase: any, userId: string) {
+async function getUserOrganization(supabase: SupabaseClient, userId: string) {
   // First get the user from users table by supabase_id
   const { data: user, error: userError } = await supabase
     .from("users")
@@ -44,7 +45,7 @@ async function getUserOrganization(supabase: any, userId: string) {
 }
 
 // Helper to fetch photos from media_assets for a listing
-async function getListingPhotos(supabase: any, listingId: string): Promise<string[]> {
+async function getListingPhotos(supabase: SupabaseClient, listingId: string): Promise<string[]> {
   const { data: mediaAssets } = await supabase
     .from("media_assets")
     .select("storage_url")
@@ -52,7 +53,13 @@ async function getListingPhotos(supabase: any, listingId: string): Promise<strin
     .eq("file_type", "image")
     .order("created_at", { ascending: true });
 
-  return (mediaAssets || []).map((m: any) => m.storage_url);
+  interface MediaAssetRow {
+    storage_url: string | null;
+  }
+
+  return ((mediaAssets || []) as MediaAssetRow[])
+    .map((m) => m.storage_url)
+    .filter((url): url is string => url !== null);
 }
 
 export const listingRouter = createTRPCRouter({
@@ -281,7 +288,23 @@ export const listingRouter = createTRPCRouter({
 
       const { id, address, city, state, zip, price, bedrooms, bathrooms, sqft, property_type, status, description, features } = input;
 
-      const updates: any = {};
+      const updates: {
+        address_line1?: string;
+        city?: string;
+        state?: string;
+        zip_code?: string;
+        listing_price?: number;
+        bedrooms?: number;
+        bathrooms?: number;
+        square_feet?: number;
+        property_type?: string;
+        listing_status?: string;
+        positioning_notes?: string | null;
+        features?: string[];
+        updated_at: string;
+      } = {
+        updated_at: new Date().toISOString(),
+      };
       if (address !== undefined) updates.address_line1 = address;
       if (city !== undefined) updates.city = city;
       if (state !== undefined) updates.state = state;
@@ -294,7 +317,6 @@ export const listingRouter = createTRPCRouter({
       if (status !== undefined) updates.listing_status = status === "active" ? "for_sale" : status;
       if (description !== undefined) updates.positioning_notes = description;
       if (features !== undefined) updates.features = features;
-      updates.updated_at = new Date().toISOString();
 
       const { data, error } = await ctx.supabase
         .from("property_listings")

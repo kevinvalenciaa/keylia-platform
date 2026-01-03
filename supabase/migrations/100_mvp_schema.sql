@@ -1,5 +1,5 @@
 -- =============================================================================
--- ReelAgent MVP Schema (Simplified)
+-- Keylia MVP Schema (Simplified)
 -- =============================================================================
 -- This is the simplified MVP schema. Run this on a fresh Supabase project.
 --

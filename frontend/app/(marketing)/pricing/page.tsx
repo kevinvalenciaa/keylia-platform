@@ -79,7 +79,7 @@ export default function PricingPage() {
       <header className="container py-6">
         <nav className="flex items-center justify-between">
           <Link href="/" className="text-2xl font-bold">
-            ReelAgent
+            Keylia
           </Link>
           <div className="flex items-center gap-4">
             <Button variant="ghost" asChild>
@@ -216,7 +216,7 @@ export default function PricingPage() {
       {/* Footer */}
       <footer className="container py-8 border-t mt-20">
         <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <p>&copy; 2024 ReelAgent. All rights reserved.</p>
+          <p>&copy; 2024 Keylia. All rights reserved.</p>
           <div className="flex gap-4">
             <Link href="/terms" className="hover:underline">
               Terms

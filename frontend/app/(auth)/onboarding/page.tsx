@@ -48,7 +48,7 @@ export default function OnboardingPage() {
     <div className="w-full max-w-lg">
       <Card>
         <CardHeader>
-          <CardTitle>Welcome to ReelAgent</CardTitle>
+          <CardTitle>Welcome to Keylia</CardTitle>
           <CardDescription>
             Tell us a bit about yourself to get started
           </CardDescription>

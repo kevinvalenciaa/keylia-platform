@@ -50,7 +50,7 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
-        // ReelEstate brand colors
+        // Keylia brand colors
         brand: {
           50: "#f0f7ff",
           100: "#e0effe",

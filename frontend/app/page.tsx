@@ -29,7 +29,7 @@ export default function LandingPage() {
               <Sparkles className="h-5 w-5 text-white" />
             </div>
             <span className="text-xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">
-              ReelAgent
+              Keylia
             </span>
           </Link>
           <nav className="hidden md:flex items-center gap-8">
@@ -159,7 +159,7 @@ export default function LandingPage() {
                   </div>
                   <div className="flex-1 flex justify-center">
                     <div className="px-4 py-1 rounded-md bg-gray-100 text-xs text-gray-500">
-                      app.reelagent.com
+                      app.keylia.io
                     </div>
                   </div>
                 </div>
@@ -171,7 +171,7 @@ export default function LandingPage() {
                         <Play className="h-10 w-10 text-white" />
                       </div>
                       <p className="text-lg font-medium text-gray-900">
-                        See ReelAgent in Action
+                        See Keylia in Action
                       </p>
                       <p className="mt-2 text-gray-500">
                         Watch how agents create content 10x faster
@@ -527,7 +527,7 @@ export default function LandingPage() {
               </h2>
               <p className="text-xl text-blue-100 mb-10">
                 Join hundreds of agents creating scroll-stopping content with
-                ReelAgent. Start your free trial today.
+                Keylia. Start your free trial today.
               </p>
               <Button
                 size="lg"
@@ -552,7 +552,7 @@ export default function LandingPage() {
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-600 to-cyan-500">
                 <Sparkles className="h-4 w-4 text-white" />
               </div>
-              <span className="font-semibold text-gray-900">ReelAgent</span>
+              <span className="font-semibold text-gray-900">Keylia</span>
             </div>
             <div className="flex items-center gap-6 text-sm text-gray-600">
               <Link href="/terms" className="hover:text-gray-900">
@@ -561,12 +561,12 @@ export default function LandingPage() {
               <Link href="/privacy" className="hover:text-gray-900">
                 Privacy
               </Link>
-              <Link href="mailto:support@reelagent.com" className="hover:text-gray-900">
+              <Link href="mailto:support@keylia.io" className="hover:text-gray-900">
                 Contact
               </Link>
             </div>
             <p className="text-sm text-gray-500">
-              © {new Date().getFullYear()} ReelAgent. All rights reserved.
+              © {new Date().getFullYear()} Keylia. All rights reserved.
             </p>
           </div>
         </div>

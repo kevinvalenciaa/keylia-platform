@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# ReelEstate Studio - Stop Development Services
+# Keylia - Stop Development Services
 
-echo "Stopping ReelEstate Studio Development Services"
-echo "==================================================="
+echo "Stopping Keylia Development Services"
+echo "======================================"
 echo ""
 
 # Colors

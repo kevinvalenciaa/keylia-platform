@@ -1,5 +1,5 @@
 """
-ReelEstate Studio API
+Keylia API
 AI-powered real estate content generation platform
 """
 
@@ -13,6 +13,7 @@ import structlog
 from app.api.v1 import router as api_v1_router
 from app.config import settings
 from app.database import init_db
+from app.middleware.rate_limit import RateLimitMiddleware
 
 # Configure structured logging
 structlog.configure(
@@ -39,23 +40,32 @@ logger = structlog.get_logger()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler."""
-    logger.info("Starting ReelEstate Studio API", version=settings.VERSION)
+    logger.info("Starting Keylia API", version=settings.VERSION)
     
     # Initialize database
     await init_db()
     
     yield
     
-    logger.info("Shutting down ReelEstate Studio API")
+    logger.info("Shutting down Keylia API")
 
 
 app = FastAPI(
-    title="ReelEstate Studio API",
+    title="Keylia API",
     description="AI-powered real estate content generation platform",
     version=settings.VERSION,
     docs_url="/api/docs" if settings.DEBUG else None,
     redoc_url="/api/redoc" if settings.DEBUG else None,
     lifespan=lifespan,
+)
+
+# Rate limiting middleware (add before CORS)
+app.add_middleware(
+    RateLimitMiddleware,
+    default_limit=100,      # 100 requests per minute for standard endpoints
+    default_window=60,
+    ai_limit=20,            # 20 requests per minute for AI endpoints
+    ai_window=60,
 )
 
 # CORS middleware
@@ -81,7 +91,7 @@ async def health_check() -> dict[str, str]:
 async def root() -> dict[str, str]:
     """Root endpoint."""
     return {
-        "message": "ReelEstate Studio API",
+        "message": "Keylia API",
         "docs": "/api/docs",
         "version": settings.VERSION,
     }

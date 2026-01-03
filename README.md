@@ -1,4 +1,4 @@
-# Keylia AI
+# Keylia
 
 **AI-powered content creation platform for real estate agents.**
 
@@ -6,7 +6,7 @@ Transform property photos into scroll-stopping social media videos and graphics 
 
 ## Overview
 
-Keylia AI is a full-stack SaaS application that leverages multiple AI services to automate real estate content creation. The platform handles the complete pipeline from photo upload to final video delivery, including AI script generation, text-to-speech voiceover, image-to-video transformation, and video composition.
+Keylia is a full-stack SaaS application that leverages multiple AI services to automate real estate content creation. The platform handles the complete pipeline from photo upload to final video delivery, including AI script generation, text-to-speech voiceover, image-to-video transformation, and video composition.
 
 ## Features
 
@@ -264,8 +264,23 @@ The application is containerized and can be deployed to any Docker-compatible en
 docker-compose up --build
 
 # Or deploy individual services
-docker build -t reelestate-backend ./backend
-docker build -t reelestate-frontend ./frontend
+docker build -t keylia-backend ./backend
+docker build -t keylia-frontend ./frontend
 ```
 
+## Contributing
 
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/new-feature`)
+3. Commit changes (`git commit -m 'Add new feature'`)
+4. Push to branch (`git push origin feature/new-feature`)
+5. Open a Pull Request
+
+## License
+
+Proprietary - All rights reserved.
+
+## Contact
+
+- Documentation: `/docs`
+- Email: support@keylia.io

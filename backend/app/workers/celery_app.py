@@ -5,7 +5,7 @@ from celery import Celery
 from app.config import settings
 
 celery_app = Celery(
-    "reelestate_workers",
+    "keylia_workers",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
     include=[

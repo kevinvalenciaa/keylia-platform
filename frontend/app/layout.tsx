@@ -7,7 +7,7 @@ import { Toaster } from "@/components/ui/toaster";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ReelAgent | AI-Powered Real Estate Content",
+  title: "Keylia | AI-Powered Real Estate Content",
   description:
     "Create stunning property content in minutes with AI. Made for real estate agents who want to stand out on social media.",
   keywords: [
@@ -17,9 +17,9 @@ export const metadata: Metadata = {
     "Instagram",
     "real estate agent tools",
   ],
-  authors: [{ name: "ReelAgent" }],
+  authors: [{ name: "Keylia" }],
   openGraph: {
-    title: "ReelAgent | AI-Powered Real Estate Content",
+    title: "Keylia | AI-Powered Real Estate Content",
     description:
       "Transform property photos into scroll-stopping social content in minutes.",
     type: "website",

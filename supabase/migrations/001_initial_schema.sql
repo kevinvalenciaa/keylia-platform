@@ -1,5 +1,5 @@
 -- =============================================================================
--- ReelEstate Studio - Initial Database Schema
+-- Keylia - Initial Database Schema
 -- =============================================================================
 -- Run this in Supabase SQL Editor (Dashboard > SQL Editor > New Query)
 -- This creates all tables, indexes, RLS policies, and triggers

@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# ReelEstate Studio - Start Development Services
+# Keylia - Start Development Services
 # This script starts all development services
 
 set -e
 
-echo "Starting ReelEstate Studio Development Services"
-echo "===================================================="
+echo "Starting Keylia Development Services"
+echo "======================================"
 echo ""
 
 # Colors
