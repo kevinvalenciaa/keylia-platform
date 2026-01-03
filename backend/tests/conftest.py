@@ -140,3 +140,99 @@ def auth_headers() -> dict[str, str]:
     return {
         "Authorization": "Bearer test-token-for-testing",
     }
+
+
+@pytest.fixture
+def mock_stripe_checkout_event() -> dict[str, Any]:
+    """Mock Stripe checkout.session.completed event."""
+    return {
+        "id": "evt_test_123",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_test_123",
+                "customer": "cus_test_123",
+                "subscription": "sub_test_123",
+                "metadata": {
+                    "supabase_user_id": "test-user-id-123",
+                    "organization_id": "test-org-id-123",
+                    "plan": "professional",
+                },
+                "mode": "subscription",
+            }
+        },
+        "livemode": False,
+        "created": 1704067200,
+    }
+
+
+@pytest.fixture
+def mock_stripe_invoice_paid_event() -> dict[str, Any]:
+    """Mock Stripe invoice.paid event."""
+    return {
+        "id": "evt_test_456",
+        "type": "invoice.paid",
+        "data": {
+            "object": {
+                "id": "in_test_456",
+                "customer": "cus_test_123",
+                "subscription": "sub_test_123",
+                "amount_paid": 2900,
+                "currency": "usd",
+                "lines": {
+                    "data": [
+                        {
+                            "price": {
+                                "id": "price_professional",
+                                "product": "prod_professional",
+                            },
+                            "period": {
+                                "start": 1704067200,
+                                "end": 1706745600,
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        "livemode": False,
+        "created": 1704067200,
+    }
+
+
+@pytest.fixture
+def mock_stripe_subscription_deleted_event() -> dict[str, Any]:
+    """Mock Stripe customer.subscription.deleted event."""
+    return {
+        "id": "evt_test_789",
+        "type": "customer.subscription.deleted",
+        "data": {
+            "object": {
+                "id": "sub_test_123",
+                "customer": "cus_test_123",
+                "status": "canceled",
+                "ended_at": 1704067200,
+            }
+        },
+        "livemode": False,
+        "created": 1704067200,
+    }
+
+
+@pytest.fixture
+def mock_render_job_data() -> dict[str, Any]:
+    """Mock render job data for testing."""
+    return {
+        "render_type": "final",
+        "settings": {
+            "duration_seconds": 30,
+            "voice_settings": {
+                "voice_id": "test-voice-id",
+                "language": "en-US",
+            },
+            "style_settings": {
+                "tone": "luxury",
+                "video_model": "kling",
+            },
+        },
+    }
