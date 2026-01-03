@@ -1,9 +1,9 @@
-"""Script generation service using LLM."""
+"""Script generation service using Anthropic Claude."""
 
 import json
 from typing import Any
 
-from openai import AsyncOpenAI
+import anthropic
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,18 @@ from app.models.brand_kit import BrandKit
 from app.models.media import MediaAsset
 from app.models.project import Project, Scene
 from app.models.property import PropertyListing
+from app.services.circuit_breaker import get_circuit_breaker, CircuitBreakerOpen
+from app.services.sanitization import sanitize_text
+
+
+def _sanitize_for_prompt(text: str | None, max_length: int = 500) -> str:
+    """
+    Sanitize user-provided text before including in AI prompts.
+    Prevents prompt injection attacks.
+    """
+    if not text:
+        return ""
+    return sanitize_text(text, max_length=max_length, allow_newlines=False)
 
 
 class ScriptScene(BaseModel):
@@ -33,12 +45,42 @@ class GeneratedScript(BaseModel):
     estimated_word_count: int
 
 
+# Circuit breaker for Anthropic API
+anthropic_breaker = get_circuit_breaker("anthropic", failure_threshold=5, recovery_timeout=60)
+
+
 class ScriptGeneratorService:
-    """Service for generating video scripts using AI."""
+    """Service for generating video scripts using Anthropic Claude."""
 
     def __init__(self):
-        self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        self.model = settings.OPENAI_MODEL
+        self.client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        self.model = settings.ANTHROPIC_MODEL
+
+    async def _call_anthropic(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 2000,
+        temperature: float = 0.8,
+    ) -> str:
+        """
+        Call Anthropic API with circuit breaker protection.
+
+        Returns the text content from Claude's response.
+        """
+        async def make_request():
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                system=system_prompt,
+                messages=[
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=temperature,
+            )
+            return response.content[0].text
+
+        return await anthropic_breaker.call(make_request)
 
     async def generate_script(
         self,
@@ -47,7 +89,7 @@ class ScriptGeneratorService:
         regenerate: bool = False,
     ) -> GeneratedScript:
         """Generate a complete video script for a project."""
-        
+
         # Get related data
         property_listing = None
         if project.property_id:
@@ -55,14 +97,14 @@ class ScriptGeneratorService:
                 select(PropertyListing).where(PropertyListing.id == project.property_id)
             )
             property_listing = result.scalar_one_or_none()
-        
+
         brand_kit = None
         if project.brand_kit_id:
             result = await db.execute(
                 select(BrandKit).where(BrandKit.id == project.brand_kit_id)
             )
             brand_kit = result.scalar_one_or_none()
-        
+
         # Get uploaded photos
         result = await db.execute(
             select(MediaAsset)
@@ -70,12 +112,12 @@ class ScriptGeneratorService:
             .order_by(MediaAsset.created_at)
         )
         photos = result.scalars().all()
-        
+
         # Build prompt
         style = project.style_settings
         duration = style.get("duration_seconds", 30)
         scene_count = self._calculate_scene_count(duration)
-        
+
         system_prompt = self._get_system_prompt()
         user_prompt = self._build_user_prompt(
             project=project,
@@ -85,23 +127,19 @@ class ScriptGeneratorService:
             duration=duration,
             scene_count=scene_count,
         )
-        
-        # Call OpenAI
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.8,
+
+        # Call Anthropic Claude
+        content = await self._call_anthropic(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
             max_tokens=2000,
-            response_format={"type": "json_object"},
+            temperature=0.8,
         )
-        
-        # Parse response
-        content = response.choices[0].message.content
-        data = json.loads(content)
-        
+
+        # Parse JSON response (Claude may wrap in markdown code blocks)
+        json_content = self._extract_json(content)
+        data = json.loads(json_content)
+
         return GeneratedScript(
             hook=data["hook"],
             scenes=[ScriptScene(**s) for s in data["scenes"]],
@@ -116,7 +154,7 @@ class ScriptGeneratorService:
         db: AsyncSession,
     ) -> dict[str, Any]:
         """Regenerate text for a specific scene."""
-        
+
         # Find adjacent scenes
         prev_scene = None
         next_scene = None
@@ -127,7 +165,7 @@ class ScriptGeneratorService:
                 if i < len(all_scenes) - 1:
                     next_scene = all_scenes[i + 1]
                 break
-        
+
         prompt = f"""
 Rewrite ONLY this specific scene from a real estate video script.
 
@@ -142,26 +180,23 @@ Next scene narration: "{next_scene.narration_text if next_scene else 'None - thi
 - Highlight different aspects or use different phrasing
 - On-screen text must be under 40 characters for mobile readability
 
-Respond with JSON:
+Respond with JSON only (no markdown code blocks):
 {{
     "narration": "New voiceover text",
     "on_screen_text": "NEW TEXT",
     "emotion": "the emotional tone"
 }}
 """
-        
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": "You are a real estate copywriter."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.9,
+
+        content = await self._call_anthropic(
+            system_prompt="You are a real estate copywriter. Respond with valid JSON only.",
+            user_prompt=prompt,
             max_tokens=500,
-            response_format={"type": "json_object"},
+            temperature=0.9,
         )
-        
-        return json.loads(response.choices[0].message.content)
+
+        json_content = self._extract_json(content)
+        return json.loads(json_content)
 
     async def generate_caption(
         self,
@@ -169,7 +204,7 @@ Respond with JSON:
         db: AsyncSession,
     ) -> dict[str, Any]:
         """Generate social media caption and hashtags."""
-        
+
         # Get property details
         property_listing = None
         if project.property_id:
@@ -177,17 +212,27 @@ Respond with JSON:
                 select(PropertyListing).where(PropertyListing.id == project.property_id)
             )
             property_listing = result.scalar_one_or_none()
-        
+
         property_info = ""
         if property_listing:
+            # Sanitize user-provided fields to prevent prompt injection
+            safe_address = _sanitize_for_prompt(property_listing.full_address, 200)
+            safe_status = _sanitize_for_prompt(
+                property_listing.listing_status.replace("_", " ").title() if property_listing.listing_status else "",
+                50
+            )
+            safe_features = ", ".join([
+                _sanitize_for_prompt(f, 100) for f in (property_listing.features or [])[:20]
+            ])
+
             property_info = f"""
-Address: {property_listing.full_address}
+Address: {safe_address}
 Price: ${property_listing.listing_price:,.0f}
 {property_listing.bedrooms} bed / {property_listing.bathrooms} bath | {property_listing.square_feet:,} sq ft
-Status: {property_listing.listing_status.replace('_', ' ').title()}
-Features: {', '.join(property_listing.features or [])}
+Status: {safe_status}
+Features: {safe_features}
 """
-        
+
         prompt = f"""
 Write a social media caption for a real estate listing video.
 
@@ -204,26 +249,23 @@ Write a social media caption for a real estate listing video.
 - Suggest 5-8 relevant hashtags
 - Optionally suggest a "first comment" with additional hashtags
 
-Respond with JSON:
+Respond with JSON only (no markdown code blocks):
 {{
     "caption": "The main caption text",
     "hashtags": ["#JustListed", "#RealEstate", ...],
     "first_comment": "Optional additional hashtags or engagement prompt"
 }}
 """
-        
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": "You are a social media marketing expert for real estate."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.7,
+
+        content = await self._call_anthropic(
+            system_prompt="You are a social media marketing expert for real estate. Respond with valid JSON only.",
+            user_prompt=prompt,
             max_tokens=500,
-            response_format={"type": "json_object"},
+            temperature=0.7,
         )
-        
-        return json.loads(response.choices[0].message.content)
+
+        json_content = self._extract_json(content)
+        return json.loads(json_content)
 
     async def generate_shot_plan(
         self,
@@ -232,19 +274,19 @@ Respond with JSON:
         db: AsyncSession,
     ) -> dict[str, Any]:
         """Generate camera movements for all scenes."""
-        
+
         pace = project.style_settings.get("pace", "moderate")
         pace_descriptions = {
             "calm": "Slow, deliberate movements for a luxury feel",
             "moderate": "Balanced pacing, professional and engaging",
             "fast": "Quick, energetic movements for TikTok-style content",
         }
-        
+
         scenes_text = "\n".join([
             f"Scene {s.sequence_order}: {s.narration_text[:100]}..."
             for s in scenes
         ])
-        
+
         prompt = f"""
 Create a shot plan for a {len(scenes)}-scene real estate video.
 
@@ -267,7 +309,7 @@ Create a shot plan for a {len(scenes)}-scene real estate video.
 - Avoid repeating the same movement type consecutively
 - Match transition style to the pace setting
 
-Respond with JSON:
+Respond with JSON only (no markdown code blocks):
 {{
     "scenes": [
         {{
@@ -286,19 +328,31 @@ Respond with JSON:
     ]
 }}
 """
-        
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": "You are a cinematographer planning camera movements for real estate videos."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.6,
+
+        content = await self._call_anthropic(
+            system_prompt="You are a cinematographer planning camera movements for real estate videos. Respond with valid JSON only.",
+            user_prompt=prompt,
             max_tokens=2000,
-            response_format={"type": "json_object"},
+            temperature=0.6,
         )
-        
-        return json.loads(response.choices[0].message.content)
+
+        json_content = self._extract_json(content)
+        return json.loads(json_content)
+
+    def _extract_json(self, content: str) -> str:
+        """Extract JSON from content that may be wrapped in markdown code blocks."""
+        content = content.strip()
+
+        # Handle markdown code blocks
+        if content.startswith("```json"):
+            content = content[7:]
+        elif content.startswith("```"):
+            content = content[3:]
+
+        if content.endswith("```"):
+            content = content[:-3]
+
+        return content.strip()
 
     def _calculate_scene_count(self, duration_seconds: int) -> int:
         """Calculate optimal scene count based on duration."""
@@ -329,7 +383,7 @@ IMPORTANT RULES:
 - Keep on-screen text under 40 characters for mobile readability
 - Use "primary bedroom" instead of "master bedroom"
 
-Output format: JSON with scene-by-scene breakdown"""
+Output format: Valid JSON only (no markdown code blocks)"""
 
     def _build_user_prompt(
         self,
@@ -340,36 +394,56 @@ Output format: JSON with scene-by-scene breakdown"""
         duration: int,
         scene_count: int,
     ) -> str:
-        """Build the user prompt for script generation."""
-        
+        """Build the user prompt for script generation.
+
+        SECURITY: All user-provided text is sanitized to prevent prompt injection.
+        """
+
         property_info = "Property details not provided"
         if property_listing:
+            # Sanitize all user-provided fields to prevent prompt injection
+            safe_address = _sanitize_for_prompt(property_listing.full_address, 200)
+            safe_neighborhood = _sanitize_for_prompt(property_listing.neighborhood, 100) or "the area"
+            safe_status = _sanitize_for_prompt(
+                property_listing.listing_status.replace("_", " ").title() if property_listing.listing_status else "",
+                50
+            )
+            safe_features = ", ".join([
+                _sanitize_for_prompt(f, 100) for f in (property_listing.features or [])[:20]
+            ])
+            safe_target = _sanitize_for_prompt(property_listing.target_audience, 100) or "home buyers"
+
             property_info = f"""
-Address: {property_listing.full_address}
-Neighborhood: {property_listing.neighborhood or 'the area'}
+Address: {safe_address}
+Neighborhood: {safe_neighborhood}
 Price: ${property_listing.listing_price:,.0f}
 Bedrooms: {property_listing.bedrooms}
 Bathrooms: {property_listing.bathrooms}
 Square Feet: {property_listing.square_feet:,}
-Status: {property_listing.listing_status.replace('_', ' ').title()}
-Key Features: {', '.join(property_listing.features or [])}
-Target Audience: {property_listing.target_audience or 'home buyers'}
+Status: {safe_status}
+Key Features: {safe_features}
+Target Audience: {safe_target}
 """
-        
+
         agent_info = "Agent info not provided"
         if brand_kit:
+            # Sanitize agent info to prevent prompt injection
+            safe_agent_name = _sanitize_for_prompt(brand_kit.agent_name, 100) or "Agent"
+            safe_brokerage = _sanitize_for_prompt(brand_kit.brokerage_name, 100) or ""
+            safe_phone = _sanitize_for_prompt(brand_kit.agent_phone, 30) or ""
+
             agent_info = f"""
-Agent: {brand_kit.agent_name or 'Agent'}
-Brokerage: {brand_kit.brokerage_name or ''}
-Phone: {brand_kit.agent_phone or ''}
+Agent: {safe_agent_name}
+Brokerage: {safe_brokerage}
+Phone: {safe_phone}
 """
-        
+
         style = project.style_settings
         photo_descriptions = "\n".join([
             f"Photo {i+1}: {p.category or 'unknown'} - {p.ai_description or 'No description'}"
             for i, p in enumerate(photos[:12])
         ]) or "No photos uploaded yet"
-        
+
         return f"""
 Create a {duration}-second video script for this property listing.
 
@@ -391,7 +465,7 @@ Platform: {style.get('platform', 'instagram_reels')}
 
 Generate a script with {scene_count} scenes. Each scene should be approximately {duration // scene_count} seconds.
 
-Respond in this exact JSON format:
+Respond with JSON only (no markdown code blocks):
 {{
     "hook": "The attention-grabbing first line",
     "scenes": [
@@ -408,4 +482,3 @@ Respond in this exact JSON format:
     "estimated_word_count": 75
 }}
 """
-

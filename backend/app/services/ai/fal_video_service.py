@@ -224,7 +224,7 @@ class FalVideoService:
                 "prompt": motion_prompt,
                 "image_url": request.image_url,
                 "aspect_ratio": "9:16",
-                "duration": "5s" if request.duration_seconds <= 5 else "10s",
+                "duration": "6s" if request.duration_seconds <= 6 else "8s",
             }
 
         elif model == VideoModel.LUMA_DREAM:
