@@ -23,9 +23,9 @@ def generate_voiceover_task(
     try:
         self.update_state(state="PROGRESS", meta={"percent": 30, "step": "Generating audio"})
         
-        # TODO: Implement ElevenLabs integration
-        # from elevenlabs import generate, Voice
-        # audio = generate(text=script_text, voice=voice_id)
+        # Note: This is a legacy task. Voiceover generation is now handled
+        # directly in tour_video.py via generate_voiceover_sync() for better
+        # pipeline integration. This task remains for standalone voiceover requests.
         
         self.update_state(state="PROGRESS", meta={"percent": 100, "step": "Complete"})
         

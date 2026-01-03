@@ -274,7 +274,7 @@ BEGIN
 
     RAISE NOTICE 'Created 6 demo scenes for project';
 
-    RAISE NOTICE '✅ Demo data created successfully!';
+    RAISE NOTICE 'Demo data created successfully!';
     RAISE NOTICE 'Demo login: demo@reelestate.studio / demo123';
 
 END $$;

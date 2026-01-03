@@ -5,7 +5,7 @@
 
 set -e  # Exit on error
 
-echo "🚀 ReelEstate Studio - Setup Script"
+echo "ReelEstate Studio - Setup Script"
 echo "===================================="
 echo ""
 
@@ -16,47 +16,47 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 # Check prerequisites
-echo "📋 Checking prerequisites..."
+echo "Checking prerequisites..."
 
 # Check Node.js
 if ! command -v node &> /dev/null; then
-    echo -e "${RED}✗ Node.js not found. Please install Node.js 20+${NC}"
+    echo -e "${RED}[ERROR] Node.js not found. Please install Node.js 20+${NC}"
     exit 1
 fi
 NODE_VERSION=$(node --version)
-echo -e "${GREEN}✓ Node.js: $NODE_VERSION${NC}"
+echo -e "${GREEN}[OK] Node.js: $NODE_VERSION${NC}"
 
 # Check Python
 if ! command -v python3 &> /dev/null; then
-    echo -e "${RED}✗ Python 3 not found. Please install Python 3.11+${NC}"
+    echo -e "${RED}[ERROR] Python 3 not found. Please install Python 3.11+${NC}"
     exit 1
 fi
 PYTHON_VERSION=$(python3 --version)
-echo -e "${GREEN}✓ Python: $PYTHON_VERSION${NC}"
+echo -e "${GREEN}[OK] Python: $PYTHON_VERSION${NC}"
 
 # Check PostgreSQL
 if ! command -v psql &> /dev/null; then
-    echo -e "${YELLOW}⚠ PostgreSQL not found. You'll need to install it or use Docker${NC}"
+    echo -e "${YELLOW}[WARN] PostgreSQL not found. You'll need to install it or use Docker${NC}"
 else
-    echo -e "${GREEN}✓ PostgreSQL found${NC}"
+    echo -e "${GREEN}[OK] PostgreSQL found${NC}"
 fi
 
 # Check Redis
 if ! command -v redis-cli &> /dev/null; then
-    echo -e "${YELLOW}⚠ Redis not found. You'll need to install it or use Docker${NC}"
+    echo -e "${YELLOW}[WARN] Redis not found. You'll need to install it or use Docker${NC}"
 else
-    echo -e "${GREEN}✓ Redis found${NC}"
+    echo -e "${GREEN}[OK] Redis found${NC}"
 fi
 
 # Check FFmpeg
 if ! command -v ffmpeg &> /dev/null; then
-    echo -e "${YELLOW}⚠ FFmpeg not found. Video processing may not work${NC}"
+    echo -e "${YELLOW}[WARN] FFmpeg not found. Video processing may not work${NC}"
 else
-    echo -e "${GREEN}✓ FFmpeg found${NC}"
+    echo -e "${GREEN}[OK] FFmpeg found${NC}"
 fi
 
 echo ""
-echo "📦 Setting up backend..."
+echo "Setting up backend..."
 
 # Backend setup
 cd backend
@@ -79,7 +79,7 @@ pip install -e ".[dev]"
 if [ ! -f ".env" ]; then
     echo "Creating .env file from example..."
     cp .env.example .env
-    echo -e "${YELLOW}⚠ Please edit backend/.env and add your API keys${NC}"
+    echo -e "${YELLOW}[WARN] Please edit backend/.env and add your API keys${NC}"
 fi
 
 # Run migrations
@@ -95,7 +95,7 @@ fi
 cd ..
 
 echo ""
-echo "📦 Setting up frontend..."
+echo "Setting up frontend..."
 
 # Frontend setup
 cd frontend
@@ -108,13 +108,13 @@ npm install
 if [ ! -f ".env.local" ]; then
     echo "Creating .env.local file from example..."
     cp .env.example .env.local
-    echo -e "${YELLOW}⚠ Please edit frontend/.env.local with your settings${NC}"
+    echo -e "${YELLOW}[WARN] Please edit frontend/.env.local with your settings${NC}"
 fi
 
 cd ..
 
 echo ""
-echo -e "${GREEN}✅ Setup complete!${NC}"
+echo -e "${GREEN}Setup complete!${NC}"
 echo ""
 echo "Next steps:"
 echo "1. Edit backend/.env and add your API keys"

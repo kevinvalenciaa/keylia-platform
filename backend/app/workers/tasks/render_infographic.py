@@ -21,8 +21,8 @@ def render_infographic_task(self, render_job_id: str, project_id: str) -> dict:
     try:
         self.update_state(state="PROGRESS", meta={"percent": 20, "step": "Loading data"})
         
-        # TODO: Implement infographic rendering
-        # Would use:
+        # Infographic rendering pipeline (Phase 2 feature)
+        # Implementation planned with:
         # - PIL/Pillow for image composition
         # - Pre-designed templates
         # - Brand kit colors and fonts

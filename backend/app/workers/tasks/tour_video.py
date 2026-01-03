@@ -320,10 +320,10 @@ Output ONLY raw JSON. No markdown."""
     sqft_str = f"{sqft:,}" if sqft else "spacious"
 
     user_prompt = f"""Listing:
-📍 {listing_data.get('address', 'Amazing Property')}
-💰 {price_str} | 🛏️ {listing_data.get('bedrooms', '?')}bd/{listing_data.get('bathrooms', '?')}ba | 📐 {sqft_str}sqft
-📌 {listing_data.get('neighborhood', listing_data.get('city', ''))}
-✨ {', '.join(listing_data.get('features', [])[:3]) or 'great layout'}
+Address: {listing_data.get('address', 'Amazing Property')}
+Price: {price_str} | {listing_data.get('bedrooms', '?')}bd/{listing_data.get('bathrooms', '?')}ba | {sqft_str}sqft
+Location: {listing_data.get('neighborhood', listing_data.get('city', ''))}
+Features: {', '.join(listing_data.get('features', [])[:3]) or 'great layout'}
 
 Write {scene_count} scenes for a {duration_seconds}s video. Return JSON:
 {{

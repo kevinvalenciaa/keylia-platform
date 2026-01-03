@@ -73,19 +73,19 @@ Go to **Storage** in your Supabase dashboard:
 1. **Create `media-assets` bucket**:
    - Click "New Bucket"
    - Name: `media-assets`
-   - Public: ❌ OFF (private)
+   - Public: OFF (private)
    - File size limit: `104857600` (100MB)
    - Allowed MIME types: `image/*,video/*,audio/*`
 
 2. **Create `brand-assets` bucket**:
    - Name: `brand-assets`
-   - Public: ✅ ON (public for logos)
+   - Public: ON (public for logos)
    - File size limit: `10485760` (10MB)
    - Allowed MIME types: `image/*`
 
 3. **Create `rendered-videos` bucket**:
    - Name: `rendered-videos`
-   - Public: ❌ OFF (private)
+   - Public: OFF (private)
    - File size limit: `524288000` (500MB)
    - Allowed MIME types: `video/*`
 
